@@ -1,11 +1,14 @@
+import numpy as np
 class Filter:
     def __init__(self):
         self.pre_trans_x = None
         self.pre_trans_y = None
         self.pre_trans_z = None
         
-    def update(self, tvecs) -> bool:
-        trans_x, trans_y, trans_z = tvecs[0][0][0], tvecs[0][0][1], tvecs[0][0][2]
+    def update(self, tvecs):
+        # Handle both 3D and 1D tvecs
+        tvec = np.array(tvecs).reshape(-1)
+        trans_x, trans_y, trans_z = tvec[0], tvec[1], tvec[2]
         is_mark_move = False
         if self.pre_trans_x is not None:
             if abs(self.pre_trans_x - trans_x) > 0.001 or abs(self.pre_trans_y - trans_y) > 0.002 or abs(self.pre_trans_z - trans_z) > 0.015:
