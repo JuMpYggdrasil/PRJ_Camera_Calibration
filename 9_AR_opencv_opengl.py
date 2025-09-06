@@ -120,37 +120,65 @@ class AR_render:
         Arguments:
             image {[np.array]} -- [frame from your camera]
         """
+        # 1. Clear the color and depth buffers. This is done at the beginning of each frame to prepare for drawing.
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        
+        
+        # 2. Set up the OpenGL projection and model-view matrices for drawing the 2D background.
         # Setting background image project_matrix and model_matrix.
+        # We switch to GL_PROJECTION mode to manipulate the projection matrix.
         glMatrixMode(GL_PROJECTION)
+        # Reset the projection matrix to the identity matrix.
         glLoadIdentity()
+        # Apply a perspective projection. The arguments are: field of view (33.7), aspect ratio (1.3),
+        # near clipping plane (0.1), and far clipping plane (100.0). This creates a 3D view for the background.
         gluPerspective(33.7, 1.3, 0.1, 100.0)
+        # Switch to GL_MODELVIEW mode to manipulate the model-view matrix.
         glMatrixMode(GL_MODELVIEW)
+        # Reset the model-view matrix to the identity matrix.
         glLoadIdentity()
      
-        # Convert image to OpenGL texture format
+        # 3. Convert the OpenCV image frame to an OpenGL texture format.
+        # Flip the image vertically (0) because OpenGL's texture coordinates are inverted relative to OpenCV's.
         bg_image = cv2.flip(image, 0)
-        bg_image = Image.fromarray(bg_image)     
+        # Convert the NumPy array (from OpenCV) to a PIL Image object.
+        bg_image = Image.fromarray(bg_image)
+        # Get the width and height of the image.    
         ix = bg_image.size[0]
         iy = bg_image.size[1]
+        # Convert the PIL image to a raw byte string with an RGBA format (adding an alpha channel for OpenGL).
         bg_image = bg_image.tobytes("raw", "BGRX", 0, -1)
   
   
-        # Create background texture
+        # 4. Create and bind the OpenGL texture for the background.
+        # Generate a single texture ID.
         texid = glGenTextures(1)
+        # Bind the generated texture ID as the current 2D texture.
         glBindTexture(GL_TEXTURE_2D, texid)
+        # Set the magnification filter to GL_NEAREST for pixelated scaling.
         glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        # Set the minification filter to GL_NEAREST.
         glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        # Load the image data into the OpenGL texture. The arguments specify the texture's
+        # target, mipmap level (0), internal format (3 components), width, height, border,
+        # pixel format (GL_RGBA), data type (GL_UNSIGNED_BYTE), and the image data itself.
         glTexImage2D(GL_TEXTURE_2D, 0, 3, ix, iy, 0, GL_RGBA, GL_UNSIGNED_BYTE, bg_image)
-                
+        
+        # 5. Draw a 2D quad (rectangle) and apply the webcam texture to it.
+        # Translate the camera back along the Z-axis so the quad is visible.
         glTranslatef(0.0,0.0,-10.0)
+        # Begin drawing a quad primitive.
         glBegin(GL_QUADS)
+        # Define the texture coordinates (glTexCoord2f) and vertex positions (glVertex3f) for each corner of the quad.
+        # The texture coordinates (0.0 to 1.0) map the texture onto the quad's vertices.
         glTexCoord2f(0.0, 1.0); glVertex3f(-4.0, -3.0, 0.0)
         glTexCoord2f(1.0, 1.0); glVertex3f( 4.0, -3.0, 0.0)
         glTexCoord2f(1.0, 0.0); glVertex3f( 4.0,  3.0, 0.0)
         glTexCoord2f(0.0, 0.0); glVertex3f(-4.0,  3.0, 0.0)
+        # End drawing the quad.
         glEnd()
 
+        # 6. Unbind the texture to prevent it from being accidentally modified by other rendering operations.
         glBindTexture(GL_TEXTURE_2D, 0)
  
  
