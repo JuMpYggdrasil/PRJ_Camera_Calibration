@@ -102,14 +102,43 @@ class AR_render:
         _, image = self.webcam.read()# get image from webcam camera.
         self.draw_background(image)  # draw background
         # glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        self.draw_objects(image, mark_size = 0.06) # draw the 3D objects.
+        self.draw_objects(image, mark_size = 0.08) # draw the 3D objects.
         glutSwapBuffers()
     
         
         # TODO add close button
         # key = cv2.waitKey(20)
         
-       
+    def draw_axis_opengl(self, axis_length=0.04):
+        """
+        Draws the X, Y, and Z axes in OpenGL.
+        - X-axis is Red
+        - Y-axis is Green
+        - Z-axis is Blue
+        """
+        glLineWidth(2.0)
+        glBegin(GL_LINES)
+        
+        # X-axis (red)
+        glColor3f(1.0, 0.0, 0.0)
+        glVertex3f(0.0, 0.0, 0.0)
+        glVertex3f(axis_length, 0.0, 0.0)
+
+        # Y-axis (green)
+        glColor3f(0.0, 1.0, 0.0)
+        glVertex3f(0.0, 0.0, 0.0)
+        glVertex3f(0.0, axis_length, 0.0)
+        
+        # Z-axis (blue)
+        glColor3f(0.0, 0.0, 1.0)
+        glVertex3f(0.0, 0.0, 0.0)
+        glVertex3f(0.0, 0.0, axis_length)
+
+        glEnd()
+        
+        # Explicitly set the color back to white before drawing the model
+        glColor3f(1.0, 1.0, 1.0) 
+        
         
  
  
@@ -183,14 +212,14 @@ class AR_render:
  
  
  
-    def draw_objects(self, image, mark_size=0.01):
+    def draw_objects(self, image, mark_size=0.08):
         """[draw models with opengl]
         
         Arguments:
             image {[np.array]} -- [frame from your camera]
         
         Keyword Arguments:
-            mark_size {float} -- [aruco mark size: unit is meter] (default: {0.01})
+            mark_size {float} -- [aruco mark size: unit is meter] (default: {0.08})
         """
         # aruco data
         aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
@@ -210,22 +239,117 @@ class AR_render:
 
         if ids is not None and corners is not None:
             rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, mark_size, self.cam_matrix, self.dist_coefs)
+            
+            # We'll use the first detected marker (e.g., ID 0) as the origin.
+            if 0 in ids:
+                i = np.where(ids.flatten() == 0)[0][0]
+                rvec = rvecs[i]
+                tvec = tvecs[i]
+                
+                draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)
+                
+                if self.filter.update(tvec):
+                    model_matrix = extrinsic2ModelView(rvec, tvec)
+                    self.pre_extrinsicMatrix[0] = model_matrix
+                else:
+                    model_matrix = self.pre_extrinsicMatrix.get(0)
+
+                if model_matrix is not None:
+                    glLoadMatrixf(model_matrix)
+                    
+                    
+                    
+                    # --- Draw the purple dot at the World Coordinate Frame origin ---
+                    glPointSize(10.0) # Set the size of the point
+                    glColor3f(1.0, 0.0, 1.0) # Set the color to purple (R, G, B)
+                    glBegin(GL_POINTS)
+                    glVertex3f(0.0, 0.0, 0.0) # Draw a point at the origin of the World Frame
+                    glEnd()
+                    # --- End of new code ---
+                    
+                    # Explicitly set the color back to white before drawing the model
+                    glColor3f(1.0, 1.0, 1.0) 
+                    
+            # Store the 3D positions of the markers we care about.
+            marker_positions = {}
+            
             for i, marker_id in enumerate(ids.flatten()):
                 if marker_id in self.models:
                     rvec = rvecs[i]
                     tvec = tvecs[i]
                     draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)
+                    
+                    
                     if self.filter.update(tvec):
                         model_matrix = extrinsic2ModelView(rvec, tvec)
                         self.pre_extrinsicMatrix[marker_id] = model_matrix
                     else:
                         model_matrix = self.pre_extrinsicMatrix.get(marker_id)
                     if model_matrix is not None:
-                        glLoadMatrixf(model_matrix)
+                        glLoadMatrixf(model_matrix) # sets the coordinate system for the next drawing call
+                        # --- Draw the OpenGL axis ---
+                        self.draw_axis_opengl(axis_length=0.05)
+                        
                         scale = self.model_scale_dict.get(marker_id, 0.01)  # Default scale if not found
                         glScaled(scale, scale, scale)
                         glTranslatef(self.translate_x, self.translate_y, self.translate_z)
                         glCallList(self.models[marker_id].gl_list)
+
+                    # Store the 3D position of the detected marker.
+                    marker_positions[marker_id] = tvecs[i][0]
+            
+            
+            
+            
+            # --- distance calculation and drawing ---
+            # Check if both markers 0 and 1 are detected.
+            if 0 in marker_positions and 1 in marker_positions:
+                point1_3d = marker_positions[0]
+                point2_3d = marker_positions[1]
+
+                # Calculate the Euclidean distance in 3D.
+                distance = np.linalg.norm(point1_3d - point2_3d)
+
+                # Project the 3D points to 2D image coordinates to draw the line.
+                # We use the midpoint for the text label.
+                mid_point_3d = (point1_3d + point2_3d) / 2
+                
+                # Since the points are already relative to the camera,
+                # we can pass zero vectors for rvec and tvec.
+                r_vec_zero = np.zeros((3, 1))
+                t_vec_zero = np.zeros((3, 1))
+                
+                points_2d, _ = cv2.projectPoints(
+                    np.array([point1_3d, point2_3d, mid_point_3d]), 
+                    r_vec_zero, 
+                    t_vec_zero, 
+                    self.cam_matrix, 
+                    self.dist_coefs
+                )
+
+                # Extract the 2D points.
+                point1_2d = tuple(points_2d[0][0].astype(int))
+                point2_2d = tuple(points_2d[1][0].astype(int))
+                mid_point_2d = tuple(points_2d[2][0].astype(int))
+
+                # Draw a line between the two marker centers.
+                cv2.line(image, point1_2d, point2_2d, (0, 255, 0), 2)
+
+                # Format the distance text.
+                distance_text = f"Distance: {distance:.2f} m"
+
+                # Draw the distance text at the midpoint.
+                cv2.putText(
+                    image, 
+                    distance_text, 
+                    mid_point_2d, 
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    0.7, 
+                    (0, 255, 0), 
+                    2, 
+                    cv2.LINE_AA
+                )
+                
         cv2.imshow("Frame", image)
         cv2.waitKey(20)
 
@@ -276,11 +400,11 @@ if __name__ == "__main__":
         dist_coeff = np.array([-0.15259701966137876, 0.6092617145206677, 0.0007901395004658092, 0.0026990411152102638, -0.6577414700462231]) 
     # Map marker IDs to model paths
     id_to_model = {
-        0: './Models/Barn/ban.obj',
+        2: './Models/Barn/ban.obj',
         1: './Models/Monster/Sinbad_4_000001.obj'
     }
     model_scale_dict = {
-        0: 0.01,  # scale for marker 0
+        2: 0.01,  # scale for marker 0
         1: 0.03   # scale for marker 1
     }
     ar_instance = AR_render(cam_matrix, dist_coeff, id_to_model, model_scale_dict)

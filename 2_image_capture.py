@@ -5,6 +5,8 @@ import os
 # --- Configuration ---
 # Define the directory where the captured photos will be saved.
 output_dir = "captured_photos"
+# output_dir = "left_images"
+# output_dir = "right_images"
 
 # Define the desired width and height for the video stream and captured images.
 # These values can be changed to match your preferred resolution.
