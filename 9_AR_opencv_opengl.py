@@ -115,7 +115,7 @@ class AR_render:
         # TODO add close button
         # key = cv2.waitKey(20)
         
-    def draw_axis_opengl(self, axis_length=0.04):
+    def draw_axis_opengl(self, axis_length=0.1):
         """
         Draws the X, Y, and Z axes in OpenGL.
         - X-axis is Red
@@ -255,8 +255,11 @@ class AR_render:
                 rvec = rvecs[i]
                 tvec = tvecs[i]
                 
-                draw_axis(image, rvec, tvec, self.cam_matrix, zero_dist_coefs)# draw on undistorted image
+                # draw_axis(image, rvec, tvec, self.cam_matrix, zero_dist_coefs)# draw on undistorted image
                 # draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)# draw on distorted image
+                
+                
+                
                 
                 if self.filter.update(tvec):
                     model_matrix = extrinsic2ModelView(rvec, tvec)
@@ -290,16 +293,33 @@ class AR_render:
                     draw_axis(image, rvec, tvec, self.cam_matrix, zero_dist_coefs)# draw on undistorted image
                     # draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)# draw on distorted image
                     
+                    # --- Draw small red circle at (x=0.1, y=0, z=0) relative to the marker origin ---
+                    point_3d = np.array([[0.15, 0.0, 0.0]], dtype=np.float32)  # 1 cm along X-axis
+                    points_2d, _ = cv2.projectPoints(point_3d, rvec, tvec, self.cam_matrix, zero_dist_coefs)
+                    center_2d = tuple(points_2d[0][0].astype(int))
+                    cv2.circle(image, center_2d, 5, (0, 0, 255), -1)  # Red circle in image
+                    
                     if self.filter.update(tvec):
                         model_matrix = extrinsic2ModelView(rvec, tvec)
                         self.pre_extrinsicMatrix[marker_id] = model_matrix
                     else:
                         model_matrix = self.pre_extrinsicMatrix.get(marker_id)
                     if model_matrix is not None:
-                        glLoadMatrixf(model_matrix) # sets the coordinate system for the next drawing call
+                        glLoadMatrixf(model_matrix)  # sets the coordinate system for the next drawing call
+
                         # --- Draw the OpenGL axis ---
-                        self.draw_axis_opengl(axis_length=0.05)
-                        
+                        self.draw_axis_opengl(axis_length=0.1)
+
+                        # --- Draw a small red sphere at (x=0.15, y=0, z=0) ---
+                        glColor3f(1.0, 0.0, 0.0)  # Red color
+                        glPushMatrix()
+                        glTranslatef(0.15, 0.0, 0.0)  # Move 15 cm along X-axis of the marker
+                        quad = gluNewQuadric()
+                        gluSphere(quad, 0.005, 12, 12)  # Radius = 0.005 m (5 mm)
+                        glPopMatrix()
+
+                        # --- Draw the 3D model ---
+                        glColor3f(1.0, 1.0, 1.0)  # Reset color
                         scale = self.model_scale_dict.get(marker_id, 0.01)  # Default scale if not found
                         glScaled(scale, scale, scale)
                         glTranslatef(self.translate_x, self.translate_y, self.translate_z)
@@ -422,8 +442,8 @@ if __name__ == "__main__":
         1: './Models/Monster/Sinbad_4_000001.obj'
     }
     model_scale_dict = {
-        0: 0.01,  # scale for marker 0
-        1: 0.03   # scale for marker 1
+        0: 0.005,  # scale for marker 0
+        1: 0.015   # scale for marker 1
     }
     ar_instance = AR_render(cam_matrix, dist_coeff, id_to_model, model_scale_dict)
     ar_instance.run()

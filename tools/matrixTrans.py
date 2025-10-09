@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-def extrinsic2ModelView(RVEC, TVEC, R_vector = True):
+def extrinsic2ModelView_old(RVEC, TVEC, R_vector = True):
     """[Get modelview matrix from RVEC and TVEC]
 
     Arguments:
@@ -24,6 +24,23 @@ def extrinsic2ModelView(RVEC, TVEC, R_vector = True):
     M = np.eye(4)
     M[:3, :] = transform_matrix
     return M.T.flatten()
+
+def extrinsic2ModelView(rvec, tvec):
+    R, _ = cv2.Rodrigues(rvec)
+    M = np.eye(4)
+    M[:3, :3] = R
+    M[:3, 3] = tvec.flatten()
+
+    # Convert from OpenCV to OpenGL coordinate system
+    flip_yz = np.array([
+        [1,  0,  0, 0],
+        [0, -1,  0, 0],
+        [0,  0, -1, 0],
+        [0,  0,  0, 1]
+    ])
+    M = flip_yz @ M
+    return M.T.astype(np.float32)  # OpenGL expects column-major order
+
 
 
 def intrinsic2Project(MTX, width, height, near_plane = 0.01, far_plane=100.0):

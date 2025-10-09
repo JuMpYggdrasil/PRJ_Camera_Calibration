@@ -35,9 +35,9 @@ def draw_axis(img, rvec, tvec, K, D):
     y_axis = tuple(np.int32(imgpts[1].ravel()))
     z_axis = tuple(np.int32(imgpts[2].ravel()))
 
-    # Now, draw the lines using the integer points
-    img = cv2.line(img, ori, x_axis, (255, 0, 0), 5) # Red line for X-axis
-    img = cv2.line(img, ori, y_axis, (0, 255, 0), 5) # Green line for Y-axis
-    img = cv2.line(img, ori, z_axis, (0, 0, 255), 5) # Blue line for Z-axis
+    # Now, draw the lines using the integer points (BGR color order)
+    img = cv2.line(img, ori, x_axis, (0, 0, 255), 2) # Red line for X-axis
+    img = cv2.line(img, ori, y_axis, (0, 255, 0), 2) # Green line for Y-axis
+    img = cv2.line(img, ori, z_axis, (255, 0, 0), 2) # Blue line for Z-axis
     
     return img
