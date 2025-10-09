@@ -9,7 +9,7 @@ chessboard_size = (9, 6)
 
 # Size of a single square in meters (or any unit of your choice).
 # This is used to calculate the real-world 3D coordinates of the corners.
-square_size = 0.0265  # 26.5 mm
+square_size = 0.0263  # 26.3 mm
 
 # --- 2. Setup Object and Image Points ---
 # Object points are the 3D coordinates of the chessboard corners in the real world.

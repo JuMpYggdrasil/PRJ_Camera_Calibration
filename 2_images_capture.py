@@ -25,7 +25,10 @@ if not os.path.exists(output_dir):
 # Initialize the video capture object.
 # The argument `0` refers to the default webcam. If you have multiple,
 # you might need to change this to 1, 2, etc.
-cap = cv.VideoCapture(0)
+
+src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
+# cap = cv.VideoCapture(0)
+cap = cv.VideoCapture(src)
 
 # Set the resolution of the video stream.
 cap.set(cv.CAP_PROP_FRAME_WIDTH, frame_width)

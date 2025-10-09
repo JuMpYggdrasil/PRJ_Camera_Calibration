@@ -26,7 +26,9 @@ class AR_render:
             model_scale {[float]} -- [your model scale size]
         """
         # Initialise webcam and start thread
-        self.webcam = cv2.VideoCapture(0)
+        src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
+        # self.webcam = cv2.VideoCapture(0)
+        self.webcam = cv2.VideoCapture(src)
         self.image_w, self.image_h = map(int, (self.webcam.get(3), self.webcam.get(4)))
         self.initOpengl(self.image_w, self.image_h)
         self.cam_matrix, self.dist_coefs = camera_matrix, dist_coefs
@@ -99,8 +101,12 @@ class AR_render:
     def draw_scene(self):
         """[Opengl render loop]
         """
-        _, image = self.webcam.read()# get image from webcam camera.
+        _, image_raw  = self.webcam.read()# get image from webcam camera.
+        # --- Undistort the image ---
+        image = cv2.undistort(image_raw, self.cam_matrix, self.dist_coefs, None, self.cam_matrix)
+
         self.draw_background(image)  # draw background
+        
         # glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         self.draw_objects(image, mark_size = 0.08) # draw the 3D objects.
         glutSwapBuffers()
@@ -238,15 +244,19 @@ class AR_render:
         glLoadIdentity()
 
         if ids is not None and corners is not None:
-            rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, mark_size, self.cam_matrix, self.dist_coefs)
+            # rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, mark_size, self.cam_matrix, self.dist_coefs)
+            zero_dist_coefs = np.zeros(5)
+            rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, mark_size, self.cam_matrix, zero_dist_coefs)
             
             # We'll use the first detected marker (e.g., ID 0) as the origin.
+            zero_dist_coefs = np.zeros(5) # Reuse or redefine here for clarity
             if 0 in ids:
                 i = np.where(ids.flatten() == 0)[0][0]
                 rvec = rvecs[i]
                 tvec = tvecs[i]
                 
-                draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)
+                draw_axis(image, rvec, tvec, self.cam_matrix, zero_dist_coefs)# draw on undistorted image
+                # draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)# draw on distorted image
                 
                 if self.filter.update(tvec):
                     model_matrix = extrinsic2ModelView(rvec, tvec)
@@ -277,8 +287,8 @@ class AR_render:
                 if marker_id in self.models:
                     rvec = rvecs[i]
                     tvec = tvecs[i]
-                    draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)
-                    
+                    draw_axis(image, rvec, tvec, self.cam_matrix, zero_dist_coefs)# draw on undistorted image
+                    # draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)# draw on distorted image
                     
                     if self.filter.update(tvec):
                         model_matrix = extrinsic2ModelView(rvec, tvec)
@@ -319,13 +329,21 @@ class AR_render:
                 r_vec_zero = np.zeros((3, 1))
                 t_vec_zero = np.zeros((3, 1))
                 
+                # points_2d, _ = cv2.projectPoints(
+                #     np.array([point1_3d, point2_3d, mid_point_3d]), 
+                #     r_vec_zero, 
+                #     t_vec_zero, 
+                #     self.cam_matrix, 
+                #     self.dist_coefs
+                # )
                 points_2d, _ = cv2.projectPoints(
                     np.array([point1_3d, point2_3d, mid_point_3d]), 
                     r_vec_zero, 
                     t_vec_zero, 
                     self.cam_matrix, 
-                    self.dist_coefs
+                    zero_dist_coefs
                 )
+                
 
                 # Extract the 2D points.
                 point1_2d = tuple(points_2d[0][0].astype(int))
@@ -400,11 +418,11 @@ if __name__ == "__main__":
         dist_coeff = np.array([-0.15259701966137876, 0.6092617145206677, 0.0007901395004658092, 0.0026990411152102638, -0.6577414700462231]) 
     # Map marker IDs to model paths
     id_to_model = {
-        2: './Models/Barn/ban.obj',
+        0: './Models/Barn/ban.obj',
         1: './Models/Monster/Sinbad_4_000001.obj'
     }
     model_scale_dict = {
-        2: 0.01,  # scale for marker 0
+        0: 0.01,  # scale for marker 0
         1: 0.03   # scale for marker 1
     }
     ar_instance = AR_render(cam_matrix, dist_coeff, id_to_model, model_scale_dict)

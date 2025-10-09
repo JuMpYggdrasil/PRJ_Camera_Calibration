@@ -28,7 +28,9 @@ model_points = np.float32([[0,0,0], [0,1,0], [1,1,0], [1,0,0],
                            [0,0,-1], [0,1,-1], [1,1,-1], [1,0,-1]])
 
 # --- 3. Initialize Video Capture ---
-cap = cv.VideoCapture(0)
+src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
+# cap = cv.VideoCapture(0)
+cap = cv.VideoCapture(src)
 
 if not cap.isOpened():
     print("Error: Could not open webcam.")
