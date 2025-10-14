@@ -107,18 +107,10 @@ class AR_render:
         # --- Undistort the image ---
         image = cv2.undistort(image_raw, self.cam_matrix, self.dist_coefs, None, self.cam_matrix)
 
-        #self.draw_background(image)  # Draw background first
-
-        # Reset matrices for AR objects
-        height, width = image.shape[:2]
-        projectMatrix = intrinsic2Project(self.cam_matrix, width, height, 0.01, 500.0)
-        glMatrixMode(GL_PROJECTION)
-        glLoadIdentity()
-        glMultMatrixf(projectMatrix)
-        glMatrixMode(GL_MODELVIEW)
-        glLoadIdentity()
-
-        self.draw_objects(image, mark_size=0.08) # draw the 3D objects.
+        self.draw_background(image)  # draw background
+        
+        # glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        self.draw_objects(image, mark_size = 0.08) # draw the 3D objects.
         
         glutSwapBuffers()
     
@@ -178,7 +170,7 @@ class AR_render:
         glLoadIdentity()
         # Apply a perspective projection. The arguments are: field of view (33.7), aspect ratio (1.3),
         # near clipping plane (0.1), and far clipping plane (100.0). This creates a 3D view for the background.
-        gluPerspective(42.5971625148761,1.7777777777777777, 0.1, 100.0)
+        gluPerspective(33.7, 1.3, 0.1, 100.0)
         # Switch to GL_MODELVIEW mode to manipulate the model-view matrix.
         glMatrixMode(GL_MODELVIEW)
         # Reset the model-view matrix to the identity matrix.
@@ -212,7 +204,7 @@ class AR_render:
         
         # 5. Draw a 2D quad (rectangle) and apply the webcam texture to it.
         # Translate the camera back along the Z-axis so the quad is visible.
-        glTranslatef(0.0, 0.0, -20.0)  # Move background further back
+        glTranslatef(0.0,0.0,-10.0)
         # Begin drawing a quad primitive.
         glBegin(GL_QUADS)
         # Define the texture coordinates (glTexCoord2f) and vertex positions (glVertex3f) for each corner of the quad.
@@ -547,15 +539,15 @@ if __name__ == "__main__":
     model_scale_dict = {
         0: 0.005,  # scale for marker 0
         1: 0.015,   # scale for marker 1
-        2: 10   # scale for marker 2
+        2: 1   # scale for marker 2
     }
     ar_instance = AR_render(cam_matrix, dist_coeff, id_to_model, model_scale_dict)
     
-    fy = cam_matrix[1, 1]
-    image_height = ar_instance.image_h
-    image_width = ar_instance.image_w
-    fovy = 2 * np.arctan(image_height / (2 * fy)) * 180 / np.pi
-    aspect = image_width / image_height
-    print(fovy, aspect) # use for gluPerspective
+    # fy = cam_matrix[1, 1]
+    # image_height = ar_instance.image_h
+    # image_width = ar_instance.image_w
+    # fovy = 2 * np.arctan(image_height / (2 * fy)) * 180 / np.pi
+    # aspect = image_width / image_height
+    # print(fovy, aspect) # use for gluPerspective
     
     ar_instance.run()

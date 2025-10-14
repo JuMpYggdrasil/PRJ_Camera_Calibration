@@ -26,7 +26,8 @@ class AR_render:
             model_scale {[float]} -- [your model scale size]
         """
         # Initialise webcam and start thread
-        src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
+        # src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
+        src="http://192.168.1.59:56193/videostream.cgi?user=admin&pwd=88888888"
         # self.webcam = cv2.VideoCapture(0)
         self.webcam = cv2.VideoCapture(src)
         self.image_w, self.image_h = map(int, (self.webcam.get(3), self.webcam.get(4)))
@@ -115,7 +116,7 @@ class AR_render:
         # TODO add close button
         # key = cv2.waitKey(20)
         
-    def draw_axis_opengl(self, axis_length=0.04):
+    def draw_axis_opengl(self, axis_length=0.1):
         """
         Draws the X, Y, and Z axes in OpenGL.
         - X-axis is Red
@@ -244,15 +245,22 @@ class AR_render:
         glLoadIdentity()
 
         if ids is not None and corners is not None:
-            rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, mark_size, self.cam_matrix, self.dist_coefs)
+            # rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, mark_size, self.cam_matrix, self.dist_coefs)
+            zero_dist_coefs = np.zeros(5)
+            rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, mark_size, self.cam_matrix, zero_dist_coefs)
             
             # We'll use the first detected marker (e.g., ID 0) as the origin.
+            zero_dist_coefs = np.zeros(5) # Reuse or redefine here for clarity
             if 0 in ids:
                 i = np.where(ids.flatten() == 0)[0][0]
                 rvec = rvecs[i]
                 tvec = tvecs[i]
                 
-                draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)
+                # draw_axis(image, rvec, tvec, self.cam_matrix, zero_dist_coefs)# draw on undistorted image
+                # draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)# draw on distorted image
+                
+                
+                
                 
                 if self.filter.update(tvec):
                     model_matrix = extrinsic2ModelView(rvec, tvec)
@@ -283,8 +291,14 @@ class AR_render:
                 if marker_id in self.models:
                     rvec = rvecs[i]
                     tvec = tvecs[i]
-                    draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)
+                    draw_axis(image, rvec, tvec, self.cam_matrix, zero_dist_coefs)# draw on undistorted image
+                    # draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)# draw on distorted image
                     
+                    # --- Draw small red circle at (x=0.1, y=0, z=0) relative to the marker origin ---
+                    point_3d = np.array([[0.15, 0.0, 0.0]], dtype=np.float32)  # 1 cm along X-axis
+                    points_2d, _ = cv2.projectPoints(point_3d, rvec, tvec, self.cam_matrix, zero_dist_coefs)
+                    center_2d = tuple(points_2d[0][0].astype(int))
+                    cv2.circle(image, center_2d, 5, (0, 0, 255), -1)  # Red circle in image
                     
                     if self.filter.update(tvec):
                         model_matrix = extrinsic2ModelView(rvec, tvec)
@@ -292,10 +306,21 @@ class AR_render:
                     else:
                         model_matrix = self.pre_extrinsicMatrix.get(marker_id)
                     if model_matrix is not None:
-                        glLoadMatrixf(model_matrix) # sets the coordinate system for the next drawing call
+                        glLoadMatrixf(model_matrix)  # sets the coordinate system for the next drawing call
+
                         # --- Draw the OpenGL axis ---
-                        self.draw_axis_opengl(axis_length=0.05)
-                        
+                        self.draw_axis_opengl(axis_length=0.1)
+
+                        # --- Draw a small red sphere at (x=0.15, y=0, z=0) ---
+                        glColor3f(1.0, 0.0, 0.0)  # Red color
+                        glPushMatrix()
+                        glTranslatef(0.15, 0.0, 0.0)  # Move 15 cm along X-axis of the marker
+                        quad = gluNewQuadric()
+                        gluSphere(quad, 0.005, 12, 12)  # Radius = 0.005 m (5 mm)
+                        glPopMatrix()
+
+                        # --- Draw the 3D model ---
+                        glColor3f(1.0, 1.0, 1.0)  # Reset color
                         scale = self.model_scale_dict.get(marker_id, 0.01)  # Default scale if not found
                         glScaled(scale, scale, scale)
                         glTranslatef(self.translate_x, self.translate_y, self.translate_z)
@@ -325,13 +350,21 @@ class AR_render:
                 r_vec_zero = np.zeros((3, 1))
                 t_vec_zero = np.zeros((3, 1))
                 
+                # points_2d, _ = cv2.projectPoints(
+                #     np.array([point1_3d, point2_3d, mid_point_3d]), 
+                #     r_vec_zero, 
+                #     t_vec_zero, 
+                #     self.cam_matrix, 
+                #     self.dist_coefs
+                # )
                 points_2d, _ = cv2.projectPoints(
                     np.array([point1_3d, point2_3d, mid_point_3d]), 
                     r_vec_zero, 
                     t_vec_zero, 
                     self.cam_matrix, 
-                    self.dist_coefs
+                    zero_dist_coefs
                 )
+                
 
                 # Extract the 2D points.
                 point1_2d = tuple(points_2d[0][0].astype(int))
@@ -355,6 +388,85 @@ class AR_render:
                     2, 
                     cv2.LINE_AA
                 )
+        # --- Top-view frame visualization (marker0 reference, shows height too) ---
+        if 0 in marker_positions:
+            # 1️⃣  Get marker0 pose
+            t0 = marker_positions[0].reshape(3)
+            try:
+                idx0 = np.where(ids.flatten() == 0)[0][0]
+                rvec0 = rvecs[idx0].reshape(3)
+            except Exception:
+                rvec0 = np.zeros(3)
+            R_m0_to_cam, _ = cv2.Rodrigues(rvec0)
+            R_cam_to_m0 = R_m0_to_cam.T  # camera → marker0 rotation
+
+            # 2️⃣  Make blank canvas
+            map_size = 600
+            scale = 300  # pixels per meter
+            center = (map_size // 2, map_size // 2)
+            map_img = np.ones((map_size, map_size, 3), np.uint8) * 255
+
+            # grid
+            for g in range(0, map_size, 50):
+                cv2.line(map_img, (g, 0), (g, map_size), (230,230,230), 1)
+                cv2.line(map_img, (0, g), (map_size, g), (230,230,230), 1)
+
+            # origin (ID0)
+            cv2.circle(map_img, center, 6, (0,0,255), -1)
+            cv2.putText(map_img, "ID0", (center[0]+8, center[1]-8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50,50,50), 1)
+
+            # 3️⃣  For each marker, compute its coordinates in marker0 frame
+            for marker_id, pos_cam in marker_positions.items():
+                t_i = pos_cam.reshape(3)
+                p_rel = R_cam_to_m0.dot(t_i - t0)  # in marker0 frame
+
+                x_m0, y_m0, z_m0 = p_rel  # local coordinates (m)
+
+                # Convert to pixel coords for top view (XY plane)
+                px = int(center[0] + x_m0 * scale)
+                py = int(center[1] - y_m0 * scale)
+
+                # Encode height (Z) by color: blue=below, red=above
+                if abs(z_m0) < 0.01:
+                    color = (0, 255, 0)   # near plane → green
+                elif z_m0 > 0:
+                    color = (0, 0, 255)   # above → red
+                else:
+                    color = (255, 0, 0)   # below → blue
+
+                cv2.circle(map_img, (px, py), 6, color, -1)
+                cv2.putText(map_img,
+                            f"ID{marker_id} z={z_m0:.3f}m",
+                            (px + 8, py - 8),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5, (30, 30, 30), 1)
+
+                # Optional: draw a small X-axis arrow in marker0 frame
+                try:
+                    idx = np.where(ids.flatten() == marker_id)[0][0]
+                    rvec_i = rvecs[idx].reshape(3)
+                    R_mi_to_cam, _ = cv2.Rodrigues(rvec_i)
+                    x_axis_cam = R_mi_to_cam @ np.array([1.0, 0.0, 0.0])
+                    x_axis_m0 = R_cam_to_m0 @ x_axis_cam
+                    end = p_rel + 0.05 * x_axis_m0
+                    px2 = int(center[0] + end[0] * scale)
+                    py2 = int(center[1] - end[1] * scale)
+                    cv2.line(map_img, (px, py), (px2, py2), (100, 100, 255), 2)
+                except Exception:
+                    pass
+
+            # 4️⃣  Display the top view
+            cv2.imshow("Top View (marker0 XY, Z color)", map_img)
+
+       
+                
+                
+                
+                
+                
+                
+                
                 
         cv2.imshow("Frame", image)
         cv2.waitKey(20)
@@ -410,8 +522,8 @@ if __name__ == "__main__":
         1: './Models/Monster/Sinbad_4_000001.obj'
     }
     model_scale_dict = {
-        0: 0.01,  # scale for marker 0
-        1: 0.03   # scale for marker 1
+        0: 0.005,  # scale for marker 0
+        1: 0.015   # scale for marker 1
     }
     ar_instance = AR_render(cam_matrix, dist_coeff, id_to_model, model_scale_dict)
     ar_instance.run()
