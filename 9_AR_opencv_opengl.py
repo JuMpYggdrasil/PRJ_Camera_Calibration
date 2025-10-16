@@ -27,7 +27,7 @@ class AR_render:
         """
         # Initialise webcam and start thread
         # src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
-        src="http://192.168.1.59:29163/videostream.cgi?user=admin&pwd=88888888"
+        src="http://192.168.1.59:45500/videostream.cgi?user=admin&pwd=88888888"
         # self.webcam = cv2.VideoCapture(0)
         self.webcam = cv2.VideoCapture(src)
         self.image_w, self.image_h = map(int, (self.webcam.get(3), self.webcam.get(4)))
@@ -561,9 +561,9 @@ if __name__ == "__main__":
     }
     model_scale_dict = {
         0: 0.005,  # scale for marker 0
-        3: 0.015,   # scale for marker 1
+        3: 1,   # scale for marker 1
         2: 10,   # scale for marker 2
-        1: 0.1
+        1: 1
     }
     ar_instance = AR_render(cam_matrix, dist_coeff, id_to_model, model_scale_dict)
     
