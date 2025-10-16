@@ -27,7 +27,7 @@ class AR_render:
         """
         # Initialise webcam and start thread
         # src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
-        src="http://192.168.1.59:56193/videostream.cgi?user=admin&pwd=88888888"
+        src="http://192.168.1.59:29163/videostream.cgi?user=admin&pwd=88888888"
         # self.webcam = cv2.VideoCapture(0)
         self.webcam = cv2.VideoCapture(src)
         self.image_w, self.image_h = map(int, (self.webcam.get(3), self.webcam.get(4)))
@@ -107,10 +107,20 @@ class AR_render:
         # --- Undistort the image ---
         image = cv2.undistort(image_raw, self.cam_matrix, self.dist_coefs, None, self.cam_matrix)
 
-        self.draw_background(image)  # draw background
-        
-        # glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        self.draw_objects(image, mark_size = 0.08) # draw the 3D objects.
+        # Clear buffer ONCE
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        self.draw_background(image)  # Draw background first
+
+        # 5️⃣ Setup camera projection for AR objects
+        height, width = image.shape[:2]
+        projectMatrix = intrinsic2Project(self.cam_matrix, width, height, 0.01, 500.0)
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glMultMatrixf(projectMatrix)
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+
+        self.draw_objects(image, mark_size=0.08) # draw the 3D objects.
         
         glutSwapBuffers()
     
@@ -150,74 +160,130 @@ class AR_render:
         
         
  
- 
- 
     def draw_background(self, image):
-        """[Draw the background and tranform to opengl format]
-        
-        Arguments:
-            image {[np.array]} -- [frame from your camera]
-        """
-        # 1. Clear the color and depth buffers. This is done at the beginning of each frame to prepare for drawing.
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        
-        
-        # 2. Set up the OpenGL projection and model-view matrices for drawing the 2D background.
-        # Setting background image project_matrix and model_matrix.
-        # We switch to GL_PROJECTION mode to manipulate the projection matrix.
-        glMatrixMode(GL_PROJECTION)
-        # Reset the projection matrix to the identity matrix.
-        glLoadIdentity()
-        # Apply a perspective projection. The arguments are: field of view (33.7), aspect ratio (1.3),
-        # near clipping plane (0.1), and far clipping plane (100.0). This creates a 3D view for the background.
-        gluPerspective(33.7, 1.3, 0.1, 100.0)
-        # Switch to GL_MODELVIEW mode to manipulate the model-view matrix.
-        glMatrixMode(GL_MODELVIEW)
-        # Reset the model-view matrix to the identity matrix.
-        glLoadIdentity()
-     
-        # 3. Convert the OpenCV image frame to an OpenGL texture format.
-        # Flip the image vertically (0) because OpenGL's texture coordinates are inverted relative to OpenCV's.
-        bg_image = cv2.flip(image, 0)
-        # Convert the NumPy array (from OpenCV) to a PIL Image object.
-        bg_image = Image.fromarray(bg_image)
-        # Get the width and height of the image.    
-        ix = bg_image.size[0]
-        iy = bg_image.size[1]
-        # Convert the PIL image to a raw byte string with an RGBA format (adding an alpha channel for OpenGL).
-        bg_image = bg_image.tobytes("raw", "BGRX", 0, -1)
-  
-  
-        # 4. Create and bind the OpenGL texture for the background.
-        # Generate a single texture ID.
-        texid = glGenTextures(1)
-        # Bind the generated texture ID as the current 2D texture.
-        glBindTexture(GL_TEXTURE_2D, texid)
-        # Set the magnification filter to GL_NEAREST for pixelated scaling.
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-        # Set the minification filter to GL_NEAREST.
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-        # Load the image data into the OpenGL texture. The arguments specify the texture's
-        # target, mipmap level (0), internal format (3 components), width, height, border,
-        # pixel format (GL_RGBA), data type (GL_UNSIGNED_BYTE), and the image data itself.
-        glTexImage2D(GL_TEXTURE_2D, 0, 3, ix, iy, 0, GL_RGBA, GL_UNSIGNED_BYTE, bg_image)
-        
-        # 5. Draw a 2D quad (rectangle) and apply the webcam texture to it.
-        # Translate the camera back along the Z-axis so the quad is visible.
-        glTranslatef(0.0,0.0,-10.0)
-        # Begin drawing a quad primitive.
-        glBegin(GL_QUADS)
-        # Define the texture coordinates (glTexCoord2f) and vertex positions (glVertex3f) for each corner of the quad.
-        # The texture coordinates (0.0 to 1.0) map the texture onto the quad's vertices.
-        glTexCoord2f(0.0, 1.0); glVertex3f(-4.0, -3.0, 0.0)
-        glTexCoord2f(1.0, 1.0); glVertex3f( 4.0, -3.0, 0.0)
-        glTexCoord2f(1.0, 0.0); glVertex3f( 4.0,  3.0, 0.0)
-        glTexCoord2f(0.0, 0.0); glVertex3f(-4.0,  3.0, 0.0)
-        # End drawing the quad.
-        glEnd()
 
-        # 6. Unbind the texture to prevent it from being accidentally modified by other rendering operations.
+        # ⚠️ Do NOT flip here (we’ll flip via texture coordinates instead) 
+        bg_image = Image.fromarray(image)
+        ix, iy = bg_image.size
+        bg_image = bg_image.tobytes("raw", "BGRX", 0, -1)
+
+        # --- Disable depth test for background ---
+        glDisable(GL_DEPTH_TEST)
+
+        # --- 2D projection for image ---
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        glOrtho(0, self.image_w, 0, self.image_h, -1, 1)
+
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        # --- Upload as texture ---
+        texid = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, texid)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ix, iy, 0, GL_RGBA, GL_UNSIGNED_BYTE, bg_image)
+
+        glEnable(GL_TEXTURE_2D)
+        glBegin(GL_QUADS)
+        
+        # 🧭 FIX: Use standard texture coordinates (0,0) at bottom-left vertex (0,0)
+        # This removes the previous flip logic.
+        glTexCoord2f(0.0, 0.0); glVertex2f(0, 0)         # Bottom-left (0, 0) gets texture bottom (Y=0)
+        glTexCoord2f(1.0, 0.0); glVertex2f(self.image_w, 0)      # Bottom-right gets texture bottom (Y=0)
+        glTexCoord2f(1.0, 1.0); glVertex2f(self.image_w, self.image_h)   # Top-right gets texture top (Y=1)
+        glTexCoord2f(0.0, 1.0); glVertex2f(0, self.image_h)      # Top-left gets texture top (Y=1)
+        
+        glEnd()
+        glDisable(GL_TEXTURE_2D)
+
+        # --- Clean up ---
         glBindTexture(GL_TEXTURE_2D, 0)
+        glDeleteTextures([texid])
+
+        # --- Restore matrices ---
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+
+        # --- Re-enable depth test for 3D ---
+        glEnable(GL_DEPTH_TEST)
+
+
+
+
+
+ 
+    # def draw_background_old(self, image):
+    #     """[Draw the background and tranform to opengl format]
+        
+    #     Arguments:
+    #         image {[np.array]} -- [frame from your camera]
+    #     """
+    #     # 1. Clear the color and depth buffers. This is done at the beginning of each frame to prepare for drawing.
+    #     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        
+        
+    #     # 2. Set up the OpenGL projection and model-view matrices for drawing the 2D background.
+    #     # Setting background image project_matrix and model_matrix.
+    #     # We switch to GL_PROJECTION mode to manipulate the projection matrix.
+    #     glMatrixMode(GL_PROJECTION)
+    #     # Reset the projection matrix to the identity matrix.
+    #     glLoadIdentity()
+    #     # Apply a perspective projection. The arguments are: field of view (33.7), aspect ratio (1.3),
+    #     # near clipping plane (0.1), and far clipping plane (100.0). This creates a 3D view for the background.
+    #     gluPerspective(42.5971625148761,1.7777777777777777, 0.1, 100.0)
+    #     # Switch to GL_MODELVIEW mode to manipulate the model-view matrix.
+    #     glMatrixMode(GL_MODELVIEW)
+    #     # Reset the model-view matrix to the identity matrix.
+    #     glLoadIdentity()
+     
+    #     # 3. Convert the OpenCV image frame to an OpenGL texture format.
+    #     # Flip the image vertically (0) because OpenGL's texture coordinates are inverted relative to OpenCV's.
+    #     bg_image = cv2.flip(image, 0)
+    #     # Convert the NumPy array (from OpenCV) to a PIL Image object.
+    #     bg_image = Image.fromarray(bg_image)
+    #     # Get the width and height of the image.    
+    #     ix = bg_image.size[0]
+    #     iy = bg_image.size[1]
+    #     # Convert the PIL image to a raw byte string with an RGBA format (adding an alpha channel for OpenGL).
+    #     bg_image = bg_image.tobytes("raw", "BGRX", 0, -1)
+  
+  
+    #     # 4. Create and bind the OpenGL texture for the background.
+    #     # Generate a single texture ID.
+    #     texid = glGenTextures(1)
+    #     # Bind the generated texture ID as the current 2D texture.
+    #     glBindTexture(GL_TEXTURE_2D, texid)
+    #     # Set the magnification filter to GL_NEAREST for pixelated scaling.
+    #     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+    #     # Set the minification filter to GL_NEAREST.
+    #     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    #     # Load the image data into the OpenGL texture. The arguments specify the texture's
+    #     # target, mipmap level (0), internal format (3 components), width, height, border,
+    #     # pixel format (GL_RGBA), data type (GL_UNSIGNED_BYTE), and the image data itself.
+    #     glTexImage2D(GL_TEXTURE_2D, 0, 3, ix, iy, 0, GL_RGBA, GL_UNSIGNED_BYTE, bg_image)
+        
+    #     # 5. Draw a 2D quad (rectangle) and apply the webcam texture to it.
+    #     # Translate the camera back along the Z-axis so the quad is visible.
+    #     glTranslatef(0.0, 0.0, -20.0)  # Move background further back
+    #     # Begin drawing a quad primitive.
+    #     glBegin(GL_QUADS)
+    #     # Define the texture coordinates (glTexCoord2f) and vertex positions (glVertex3f) for each corner of the quad.
+    #     # The texture coordinates (0.0 to 1.0) map the texture onto the quad's vertices.
+    #     glTexCoord2f(0.0, 1.0); glVertex3f(-4.0, -3.0, 0.0)
+    #     glTexCoord2f(1.0, 1.0); glVertex3f( 4.0, -3.0, 0.0)
+    #     glTexCoord2f(1.0, 0.0); glVertex3f( 4.0,  3.0, 0.0)
+    #     glTexCoord2f(0.0, 0.0); glVertex3f(-4.0,  3.0, 0.0)
+    #     # End drawing the quad.
+    #     glEnd()
+
+    #     # 6. Unbind the texture to prevent it from being accidentally modified by other rendering operations.
+    #     glBindTexture(GL_TEXTURE_2D, 0)
  
  
  
@@ -341,40 +407,112 @@ class AR_render:
             
             
             
-            # --- distance calculation and drawing ---
+            # # --- distance calculation and drawing ---
+            # # Check if both markers 0 and 1 are detected.
+            # if 0 in marker_positions and 1 in marker_positions:
+            #     point1_3d = marker_positions[0]
+            #     point2_3d = marker_positions[1]
+
+            #     # Calculate the Euclidean distance in 3D.
+            #     distance = np.linalg.norm(point1_3d - point2_3d)
+
+            #     # Project the 3D points to 2D image coordinates to draw the line.
+            #     # We use the midpoint for the text label.
+            #     mid_point_3d = (point1_3d + point2_3d) / 2
+                
+            #     # Since the points are already relative to the camera,
+            #     # we can pass zero vectors for rvec and tvec.
+            #     r_vec_zero = np.zeros((3, 1))
+            #     t_vec_zero = np.zeros((3, 1))
+                
+            #     # points_2d, _ = cv2.projectPoints(
+            #     #     np.array([point1_3d, point2_3d, mid_point_3d]), 
+            #     #     r_vec_zero, 
+            #     #     t_vec_zero, 
+            #     #     self.cam_matrix, 
+            #     #     self.dist_coefs
+            #     # )
+            #     points_2d, _ = cv2.projectPoints(
+            #         np.array([point1_3d, point2_3d, mid_point_3d]), 
+            #         r_vec_zero, 
+            #         t_vec_zero, 
+            #         self.cam_matrix, 
+            #         zero_dist_coefs
+            #     )
+                
+
+            #     # Extract the 2D points.
+            #     point1_2d = tuple(points_2d[0][0].astype(int))
+            #     point2_2d = tuple(points_2d[1][0].astype(int))
+            #     mid_point_2d = tuple(points_2d[2][0].astype(int))
+
+            #     # Draw a line between the two marker centers.
+            #     cv2.line(image, point1_2d, point2_2d, (0, 255, 0), 2)
+
+            #     # Format the distance text.
+            #     distance_text = f"Distance: {distance:.2f} m"
+
+            #     # Draw the distance text at the midpoint.
+            #     cv2.putText(
+            #         image, 
+            #         distance_text, 
+            #         mid_point_2d, 
+            #         cv2.FONT_HERSHEY_SIMPLEX, 
+            #         0.7, 
+            #         (0, 255, 0), 
+            #         2, 
+            #         cv2.LINE_AA
+            #     )
+            # --- distance calculation and drawing in ID0 frame ---
             # Check if both markers 0 and 1 are detected.
             if 0 in marker_positions and 1 in marker_positions:
-                point1_3d = marker_positions[0]
-                point2_3d = marker_positions[1]
+                point0_3d_cam = marker_positions[0] # tvec for marker 0 (in Camera Frame)
+                point1_3d_cam = marker_positions[1] # tvec for marker 1 (in Camera Frame)
 
-                # Calculate the Euclidean distance in 3D.
-                distance = np.linalg.norm(point1_3d - point2_3d)
+                # Get rotation vector for marker 0
+                try:
+                    idx0 = np.where(ids.flatten() == 0)[0][0]
+                    rvec0 = rvecs[idx0].reshape(3, 1)
+                except Exception:
+                    # Fallback if rvec0 is somehow missed (though it should be here)
+                    rvec0 = np.zeros((3, 1))
 
-                # Project the 3D points to 2D image coordinates to draw the line.
-                # We use the midpoint for the text label.
-                mid_point_3d = (point1_3d + point2_3d) / 2
+                # 1. Calculate the rotation matrix R_cam_to_m0 (Rotation from Camera to Marker 0 frame)
+                # R_m0_to_cam is the rotation from Marker 0 to Camera frame
+                R_m0_to_cam, _ = cv2.Rodrigues(rvec0)
+                R_cam_to_m0 = R_m0_to_cam.T # The inverse rotation
+
+                # 2. Compute the position of Marker 1 RELATIVE to Marker 0, in Marker 0's frame
+                # p_rel_cam = t1 - t0  (Vector from 0 to 1, in Camera Frame)
+                p_rel_cam = point1_3d_cam - point0_3d_cam
+
+                # p_rel_m0 = R_cam_to_m0 @ p_rel_cam (Vector from 0 to 1, in Marker 0 Frame)
+                p_rel_m0 = R_cam_to_m0 @ p_rel_cam.reshape(3, 1)
+
+                # 3. Extract the distances and calculate the total Euclidean distance
+                dx = p_rel_m0[0, 0]
+                dy = p_rel_m0[1, 0]
+                dz = p_rel_m0[2, 0]
                 
-                # Since the points are already relative to the camera,
-                # we can pass zero vectors for rvec and tvec.
+                # Total distance (Euclidean, should match the old calculation)
+                distance_total = np.linalg.norm(p_rel_cam) 
+
+                # 4. Project the 3D points to 2D image coordinates to draw the line and text.
+                # Use the midpoint of the camera vectors for the text label position.
+                mid_point_3d_cam = (point0_3d_cam + point1_3d_cam) / 2
+                
                 r_vec_zero = np.zeros((3, 1))
                 t_vec_zero = np.zeros((3, 1))
                 
-                # points_2d, _ = cv2.projectPoints(
-                #     np.array([point1_3d, point2_3d, mid_point_3d]), 
-                #     r_vec_zero, 
-                #     t_vec_zero, 
-                #     self.cam_matrix, 
-                #     self.dist_coefs
-                # )
+                # Project points to 2D
                 points_2d, _ = cv2.projectPoints(
-                    np.array([point1_3d, point2_3d, mid_point_3d]), 
+                    np.array([point0_3d_cam, point1_3d_cam, mid_point_3d_cam]), 
                     r_vec_zero, 
                     t_vec_zero, 
                     self.cam_matrix, 
                     zero_dist_coefs
                 )
                 
-
                 # Extract the 2D points.
                 point1_2d = tuple(points_2d[0][0].astype(int))
                 point2_2d = tuple(points_2d[1][0].astype(int))
@@ -383,17 +521,31 @@ class AR_render:
                 # Draw a line between the two marker centers.
                 cv2.line(image, point1_2d, point2_2d, (0, 255, 0), 2)
 
-                # Format the distance text.
-                distance_text = f"Distance: {distance:.2f} m"
+                # 5. Format the distance text.
+                # Include the component distances relative to ID0's frame.
+                distance_text1 = f"Total Dist: {distance_total:.2f} m"
+                distance_text2 = f"DX: {dx:.2f}m, DY: {dy:.2f}m" # Z-distance is often omitted
 
                 # Draw the distance text at the midpoint.
+                y_offset = 20 # To separate the two lines of text
+
                 cv2.putText(
                     image, 
-                    distance_text, 
+                    distance_text1, 
                     mid_point_2d, 
                     cv2.FONT_HERSHEY_SIMPLEX, 
                     0.7, 
                     (0, 255, 0), 
+                    2, 
+                    cv2.LINE_AA
+                )
+                cv2.putText(
+                    image, 
+                    distance_text2, 
+                    (mid_point_2d[0], mid_point_2d[1] + y_offset), # Move down for the second line
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    0.7, 
+                    (255, 255, 0), # Yellow color for component distances
                     2, 
                     cv2.LINE_AA
                 )
@@ -539,15 +691,15 @@ if __name__ == "__main__":
     model_scale_dict = {
         0: 0.005,  # scale for marker 0
         1: 0.015,   # scale for marker 1
-        2: 1   # scale for marker 2
+        2: 10   # scale for marker 2
     }
     ar_instance = AR_render(cam_matrix, dist_coeff, id_to_model, model_scale_dict)
     
-    # fy = cam_matrix[1, 1]
-    # image_height = ar_instance.image_h
-    # image_width = ar_instance.image_w
-    # fovy = 2 * np.arctan(image_height / (2 * fy)) * 180 / np.pi
-    # aspect = image_width / image_height
-    # print(fovy, aspect) # use for gluPerspective
+    fy = cam_matrix[1, 1]
+    image_height = ar_instance.image_h
+    image_width = ar_instance.image_w
+    fovy = 2 * np.arctan(image_height / (2 * fy)) * 180 / np.pi
+    aspect = image_width / image_height
+    print(fovy, aspect) # use for gluPerspective
     
     ar_instance.run()
