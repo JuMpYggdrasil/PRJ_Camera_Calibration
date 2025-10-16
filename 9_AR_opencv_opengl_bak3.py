@@ -228,10 +228,10 @@ class AR_render:
         # aruco data
         aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_6X6_250)
         parameters = aruco.DetectorParameters()
-        # parameters.adaptiveThreshConstant = 7.0
-        parameters.adaptiveThreshConstant = 10.0 # ลองเพิ่มค่า
-        parameters.minMarkerPerimeterRate = 0.01 # ลดค่านี้เพื่อตรวจจับมาร์คเกอร์ที่เล็กมาก
-        parameters.polygonalApproxAccuracyRate = 0.03 # ลดค่านี้เพื่อความแม่นยำในการตรวจจับขอบเขต
+        parameters.adaptiveThreshConstant = 7.0
+        # parameters.adaptiveThreshConstant = 10.0 # ลองเพิ่มค่า
+        # parameters.minMarkerPerimeterRate = 0.01 # ลดค่านี้เพื่อตรวจจับมาร์คเกอร์ที่เล็กมาก
+        # parameters.polygonalApproxAccuracyRate = 0.03 # ลดค่านี้เพื่อความแม่นยำในการตรวจจับขอบเขต
 
         height, width, channels = image.shape
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -580,6 +580,11 @@ class AR_render:
             #***********************************************************************************
 
                     
+                    
+                
+                
+                
+                
                 
                 
         cv2.imshow("Frame", image)
