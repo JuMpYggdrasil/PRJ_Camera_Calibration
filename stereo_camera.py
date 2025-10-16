@@ -32,12 +32,22 @@ def run_stereo_viewer(left_cam_index, right_cam_index):
         print(f"Error: Could not open right camera at index {right_cam_index}")
         return
 
-    # Get image dimensions from the first frame
+    # # Set both cameras to 1280x720
+    # TARGET_W, TARGET_H = 1280, 720
+    # cap_left.set(cv2.CAP_PROP_FRAME_WIDTH, TARGET_W)
+    # cap_left.set(cv2.CAP_PROP_FRAME_HEIGHT, TARGET_H)
+    # cap_right.set(cv2.CAP_PROP_FRAME_WIDTH, TARGET_W)
+    # cap_right.set(cv2.CAP_PROP_FRAME_HEIGHT, TARGET_H)
+
+    # Give cameras one frame to adjust, then read to confirm actual size
     ret, frame = cap_left.read()
     if not ret:
         print("Failed to read a frame to get dimensions.")
         return
     h, w = frame.shape[:2]
+
+    # Print image dimensions (width, height)
+    print(f"Initial frame dimensions: width={w}, height={h}, channels={frame.shape[2] if frame.ndim==3 else 1}")
 
     # Compute the rectification transforms
     R_l, R_r, P_l, P_r, Q, _, _ = cv2.stereoRectify(mtx_l, dist_l, mtx_r, dist_r, (w, h), R, T)
@@ -86,9 +96,18 @@ def run_stereo_viewer(left_cam_index, right_cam_index):
         # Combine the left camera feed and the depth map
         combined_output = np.concatenate((frame_l, depth_map), axis=1)
 
-        # Display the frames in separate windows.
-        cv2.imshow("Rectified Images", rectified_combined)
-        cv2.imshow("Stereo Viewer (Left Camera | Depth Map)", combined_output)
+        # --- Reduce size for display (change scale as needed) ---
+        display_scale = 0.5  # e.g. 0.5 = half size, set to <=1.0
+
+        rectified_disp = cv2.resize(rectified_combined, (0, 0), fx=display_scale, fy=display_scale, interpolation=cv2.INTER_AREA)
+        frame_l_disp = cv2.resize(frame_l, (0, 0), fx=display_scale, fy=display_scale, interpolation=cv2.INTER_AREA)
+        depth_map_disp = cv2.resize(depth_map, (frame_l_disp.shape[1], frame_l_disp.shape[0]), interpolation=cv2.INTER_AREA)
+
+        combined_output_disp = np.concatenate((frame_l_disp, depth_map_disp), axis=1)
+
+        # Display the resized frames
+        cv2.imshow("Rectified Images", rectified_disp)
+        cv2.imshow("Stereo Viewer (Left Camera | Depth Map)", combined_output_disp)
 
         # Press 'q' to quit the program.
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -101,4 +120,4 @@ def run_stereo_viewer(left_cam_index, right_cam_index):
 
 if __name__ == "__main__":
     # Call the main function with your camera indices.
-    run_stereo_viewer(0, 2)
+    run_stereo_viewer(2, 1)

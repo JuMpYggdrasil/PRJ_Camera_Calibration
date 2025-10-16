@@ -17,7 +17,7 @@ def take_stereo_photos(left_cam_index, right_cam_index):
     # Set resolutions
     # Camera at index 0 (left) will have a resolution of 1280x960
     # Camera at index 2 (right) will have a resolution of 640x480
-    high_res_w, high_res_h = 1280, 960
+    high_res_w, high_res_h = 640, 480
     low_res_w, low_res_h = 640, 480
     
     cap_left.set(cv2.CAP_PROP_FRAME_WIDTH, high_res_w)
@@ -80,4 +80,4 @@ def take_stereo_photos(left_cam_index, right_cam_index):
 if __name__ == "__main__":
     # Call the function with the desired camera indices
     # Now using cameras at indices 0 and 1.
-    take_stereo_photos(0, 1)
+    take_stereo_photos(2, 1)
