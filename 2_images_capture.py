@@ -4,14 +4,14 @@ import os
 
 # --- Configuration ---
 # Define the directory where the captured photos will be saved.
-# output_dir = "captured_photos"
-output_dir = "left_images"
+output_dir = "captured_photos"
+# output_dir = "left_images"
 # output_dir = "right_images"
 
 # Define the desired width and height for the video stream and captured images.
 # These values can be changed to match your preferred resolution.
-frame_width = 1280
-frame_height = 720
+frame_width = 640
+frame_height = 360
 
 # Define the maximum number of photos to capture.
 max_photos = 30
@@ -26,7 +26,7 @@ if not os.path.exists(output_dir):
 # The argument `0` refers to the default webcam. If you have multiple,
 # you might need to change this to 1, 2, etc.
 
-src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
+src="http://192.168.1.59:7180/videostream.cgi?user=admin&pwd=88888888"
 # cap = cv.VideoCapture(0)
 cap = cv.VideoCapture(src)
 

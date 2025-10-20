@@ -25,13 +25,14 @@ class AR_render:
             id_to_model {[dict]} -- [dictionary mapping marker IDs to model paths]
             model_scale {[float]} -- [your model scale size]
         """
+
         # Initialise webcam and start thread
         # src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
-        src="http://192.168.1.59:45500/videostream.cgi?user=admin&pwd=88888888"
+        src="http://192.168.1.59:7180/videostream.cgi?user=admin&pwd=88888888"
         # self.webcam = cv2.VideoCapture(0)
         self.webcam = cv2.VideoCapture(src)
         self.image_w, self.image_h = map(int, (self.webcam.get(3), self.webcam.get(4)))
-        print(self.image_w, self.image_h)
+        print("wh: ",self.image_w, self.image_h)
         self.initOpengl(self.image_w, self.image_h)
         self.cam_matrix, self.dist_coefs = camera_matrix, dist_coefs
         self.projectMatrix = intrinsic2Project(camera_matrix, self.image_w, self.image_h, 0.01, 100.0)
@@ -234,6 +235,7 @@ class AR_render:
         parameters.polygonalApproxAccuracyRate = 0.03 # ลดค่านี้เพื่อความแม่นยำในการตรวจจับขอบเขต
 
         height, width, channels = image.shape
+        # print(height, width)
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
 
@@ -288,298 +290,271 @@ class AR_render:
                     # Explicitly set the color back to white before drawing the model
                     glColor3f(1.0, 1.0, 1.0) 
                     
-            # Store the 3D positions of the markers we care about.
-            marker_positions = {}
-            
-            for i, marker_id in enumerate(ids.flatten()):
-                if marker_id in self.models:
-                    rvec = rvecs[i]
-                    tvec = tvecs[i]
-                    draw_axis(image, rvec, tvec, self.cam_matrix, zero_dist_coefs)# draw on undistorted image
-                    # draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)# draw on distorted image
-                    
-                    # --- Draw small red circle at (x=0.1, y=0, z=0) relative to the marker origin ---
-                    point_3d = np.array([[0.15, 0.0, 0.0]], dtype=np.float32)  # 1 cm along X-axis
-                    points_2d, _ = cv2.projectPoints(point_3d, rvec, tvec, self.cam_matrix, zero_dist_coefs)
-                    center_2d = tuple(points_2d[0][0].astype(int))
-                    cv2.circle(image, center_2d, 5, (0, 0, 255), -1)  # Red circle in image
-                    
-                    if self.filter.update(tvec):
-                        model_matrix = extrinsic2ModelView(rvec, tvec)
-                        self.pre_extrinsicMatrix[marker_id] = model_matrix
-                    else:
-                        model_matrix = self.pre_extrinsicMatrix.get(marker_id)
-                    if model_matrix is not None:
-                        glLoadMatrixf(model_matrix)  # sets the coordinate system for the next drawing call
-
-                        # --- Draw the OpenGL axis ---
-                        self.draw_axis_opengl(axis_length=0.1)
-
-                        # --- Draw a small red sphere at (x=0.15, y=0, z=0) ---
-                        glColor3f(1.0, 0.0, 0.0)  # Red color
-                        glPushMatrix()
-                        glTranslatef(0.15, 0.0, 0.0)  # Move 15 cm along X-axis of the marker
-                        quad = gluNewQuadric()
-                        gluSphere(quad, 0.005, 12, 12)  # Radius = 0.005 m (5 mm)
-                        glPopMatrix()
-
-                        # --- Draw the 3D model ---
-                        glColor3f(1.0, 1.0, 1.0)  # Reset color
-                        scale = self.model_scale_dict.get(marker_id, 0.01)  # Default scale if not found
-                        glScaled(scale, scale, scale)
-                        glTranslatef(self.translate_x, self.translate_y, self.translate_z)
-                        glCallList(self.models[marker_id].gl_list)
-
-                    # Store the 3D position of the detected marker.
-                    marker_positions[marker_id] = tvecs[i][0]
-            
-            # --- distance calculation and drawing in ID0 frame ---
-            # Check if both markers 0 and 1 are detected.
-            if 0 in marker_positions and 1 in marker_positions:
-                point0_3d_cam = marker_positions[0] # tvec for marker 0 (in Camera Frame)
-                point1_3d_cam = marker_positions[1] # tvec for marker 1 (in Camera Frame)
-
-                # Get rotation vector for marker 0
-                try:
-                    idx0 = np.where(ids.flatten() == 0)[0][0]
-                    rvec0 = rvecs[idx0].reshape(3, 1)
-                except Exception:
-                    # Fallback if rvec0 is somehow missed (though it should be here)
-                    rvec0 = np.zeros((3, 1))
-
-                # 1. Calculate the rotation matrix R_cam_to_m0 (Rotation from Camera to Marker 0 frame)
-                # R_m0_to_cam is the rotation from Marker 0 to Camera frame
-                R_m0_to_cam, _ = cv2.Rodrigues(rvec0)
-                R_cam_to_m0 = R_m0_to_cam.T # The inverse rotation
-
-                # 2. Compute the position of Marker 1 RELATIVE to Marker 0, in Marker 0's frame
-                # p_rel_cam = t1 - t0  (Vector from 0 to 1, in Camera Frame)
-                p_rel_cam = point1_3d_cam - point0_3d_cam
-
-                # p_rel_m0 = R_cam_to_m0 @ p_rel_cam (Vector from 0 to 1, in Marker 0 Frame)
-                p_rel_m0 = R_cam_to_m0 @ p_rel_cam.reshape(3, 1)
-
-                # # 3. Extract the distances and calculate the total Euclidean distance
-                # dx = p_rel_m0[0, 0]
-                # dy = p_rel_m0[1, 0]
-                # dz = p_rel_m0[2, 0]
+                # Store the 3D positions of the markers we care about.
+                marker_positions = {}
                 
-                # # Total distance (Euclidean, should match the old calculation)
-                # distance_total = np.linalg.norm(p_rel_cam) 
+                for i, marker_id in enumerate(ids.flatten()):
+                    if marker_id in self.models:
+                        rvec = rvecs[i]
+                        tvec = tvecs[i]
+                        draw_axis(image, rvec, tvec, self.cam_matrix, zero_dist_coefs)# draw on undistorted image
+                        # draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)# draw on distorted image
+                        
+                        # --- Draw small red circle at (x=0.1, y=0, z=0) relative to the marker origin ---
+                        point_3d = np.array([[0.15, 0.0, 0.0]], dtype=np.float32)  # 1 cm along X-axis
+                        points_2d, _ = cv2.projectPoints(point_3d, rvec, tvec, self.cam_matrix, zero_dist_coefs)
+                        center_2d = tuple(points_2d[0][0].astype(int))
+                        cv2.circle(image, center_2d, 5, (0, 0, 255), -1)  # Red circle in image
+                        
+                        if self.filter.update(tvec):
+                            model_matrix = extrinsic2ModelView(rvec, tvec)
+                            self.pre_extrinsicMatrix[marker_id] = model_matrix
+                        else:
+                            model_matrix = self.pre_extrinsicMatrix.get(marker_id)
+                        if model_matrix is not None:
+                            glLoadMatrixf(model_matrix)  # sets the coordinate system for the next drawing call
 
-                # # 4. Project the 3D points to 2D image coordinates to draw the line and text.
-                # # Use the midpoint of the camera vectors for the text label position.
-                # mid_point_3d_cam = (point0_3d_cam + point1_3d_cam) / 2
+                            # --- Draw the OpenGL axis ---
+                            self.draw_axis_opengl(axis_length=0.1)
+
+                            # --- Draw a small red sphere at (x=0.15, y=0, z=0) ---
+                            glColor3f(1.0, 0.0, 0.0)  # Red color
+                            glPushMatrix()
+                            glTranslatef(0.15, 0.0, 0.0)  # Move 15 cm along X-axis of the marker
+                            quad = gluNewQuadric()
+                            gluSphere(quad, 0.005, 12, 12)  # Radius = 0.005 m (5 mm)
+                            glPopMatrix()
+
+                            # --- Draw the 3D model ---
+                            glColor3f(1.0, 1.0, 1.0)  # Reset color
+                            scale = self.model_scale_dict.get(marker_id, 0.01)  # Default scale if not found
+                            glScaled(scale, scale, scale)
+                            glTranslatef(self.translate_x, self.translate_y, self.translate_z)
+                            glCallList(self.models[marker_id].gl_list)
+
+                        # Store the 3D position of the detected marker.
+                        marker_positions[marker_id] = tvecs[i][0]
                 
-                # r_vec_zero = np.zeros((3, 1))
-                # t_vec_zero = np.zeros((3, 1))
-                
-                # # Project points to 2D
-                # points_2d, _ = cv2.projectPoints(
-                #     np.array([point0_3d_cam, point1_3d_cam, mid_point_3d_cam]), 
-                #     r_vec_zero, 
-                #     t_vec_zero, 
-                #     self.cam_matrix, 
-                #     zero_dist_coefs
-                # )
-                
-                # # Extract the 2D points.
-                # point1_2d = tuple(points_2d[0][0].astype(int))
-                # point2_2d = tuple(points_2d[1][0].astype(int))
-                # mid_point_2d = tuple(points_2d[2][0].astype(int))
+                # --- distance calculation and drawing in ID0 frame ---
+                # Check if both markers 0 and 4 are detected.
+                if 0 in marker_positions and 4 in marker_positions:
+                    point0_3d_cam = marker_positions[0] # tvec for marker 0 (in Camera Frame)
+                    point1_3d_cam = marker_positions[1] # tvec for marker 1 (in Camera Frame)
+                    point2_3d_cam = marker_positions[2] # tvec for marker 2 (in Camera Frame)
+                    point3_3d_cam = marker_positions[3] # tvec for marker 3 (in Camera Frame)
+                    point4_3d_cam = marker_positions[4] # tvec for marker 4 (in Camera Frame)
 
-                # # Draw a line between the two marker centers. BGR
-                # cv2.line(image, point1_2d, point2_2d, (128, 0, 128), 2)
-
-                # # 5. Format the distance text.
-                # # Include the component distances relative to ID0's frame.
-                # distance_text1 = f"Total Dist: {distance_total:.2f} m"
-                # distance_text2 = f"DX: {dx:.2f}m, DY: {dy:.2f}m, DZ: {dz:.2f}m" # Z-distance is often omitted
-
-                # # Draw the distance text at the midpoint.
-                # y_offset = 20 # To separate the two lines of text
-
-                # cv2.putText(
-                #     image, 
-                #     distance_text1, 
-                #     mid_point_2d, 
-                #     cv2.FONT_HERSHEY_SIMPLEX, 
-                #     0.7, 
-                #     (128, 0, 128), # purple line
-                #     2, 
-                #     cv2.LINE_AA
-                # )
-                # cv2.putText(
-                #     image, 
-                #     distance_text2, 
-                #     (mid_point_2d[0], mid_point_2d[1] + y_offset), # Move down for the second line
-                #     cv2.FONT_HERSHEY_SIMPLEX, 
-                #     0.7, 
-                #     (255, 255, 0), # Yellow color for component distances
-                #     2, 
-                #     cv2.LINE_AA
-                # )
-                # ...existing code2...
-                # 3. Extract the distances and calculate the total Euclidean distance
-                dx = p_rel_m0[0, 0]
-                dy = p_rel_m0[1, 0]
-                dz = p_rel_m0[2, 0]
-                
-                # Total distance (Euclidean, should match the old calculation)
-                distance_total = np.linalg.norm(p_rel_cam) 
-
-                # 4. Project the 3D points to 2D image coordinates to draw the line and text.
-                # Use the midpoint of the camera vectors for the text label position.
-                mid_point_3d_cam = (point0_3d_cam + point1_3d_cam) / 2
-                
-                r_vec_zero = np.zeros((3, 1))
-                t_vec_zero = np.zeros((3, 1))
-                
-                # Project points to 2D
-                points_2d, _ = cv2.projectPoints(
-                    np.array([point0_3d_cam, point1_3d_cam, mid_point_3d_cam]), 
-                    r_vec_zero, 
-                    t_vec_zero, 
-                    self.cam_matrix, 
-                    zero_dist_coefs
-                )
-                
-                # Extract the 2D points.
-                point1_2d = tuple(points_2d[0][0].astype(int))
-                point2_2d = tuple(points_2d[1][0].astype(int))
-                mid_point_2d = tuple(points_2d[2][0].astype(int))
-
-                # Draw a line between the two marker centers. BGR
-                cv2.line(image, point1_2d, point2_2d, (128, 0, 128), 2)
-
-                # # --- NEW: draw projected purple line along marker0 X axis (length = dx) ---
-                # # point at (dx, 0, 0) in marker0 frame
-                # pt_dx_m0 = np.array([[dx], [0.0], [0.0]], dtype=np.float64)  # column vector
-                # # convert to camera frame: cam_pt = R_m0_to_cam * pt_m0 + t0
-                # cam_pt_dx = R_m0_to_cam @ pt_dx_m0 + point0_3d_cam.reshape(3,1)
-                # # project to 2D (camera-frame point, use zero rvec/tvec)
-                # proj_dx, _ = cv2.projectPoints(cam_pt_dx.reshape(1,3), r_vec_zero, t_vec_zero, self.cam_matrix, zero_dist_coefs)
-                # proj_dx2 = tuple(proj_dx[0][0].astype(int))
-
-                # # origin in image is point0_2d (point1_2d variable above)
-                # origin2d = point1_2d
-                # cv2.line(image, origin2d, proj_dx2, (255, 0, 255), 2)  # purple line along marker0 X axis
-
-                # # label dx value near the middle of that line
-                # mid_x = ((origin2d[0] + proj_dx2[0]) // 2, (origin2d[1] + proj_dx2[1]) // 2)
-                # cv2.putText(image, f"dx={dx:.2f}m", mid_x, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,0,255), 2, cv2.LINE_AA)
-                # # --- End of new code --
-                # ...existing code...
-                # --- NEW: draw projected purple line along marker0 X axis (length = dx) ---
-                # point at (dx, 0, 0) in marker0 frame
-                pt_dx_m0 = np.array([[dx], [0.0], [0.0]], dtype=np.float64)  # column vector
-                # convert to camera frame: cam_pt = R_m0_to_cam * pt_m0 + t0
-                cam_pt_dx = R_m0_to_cam @ pt_dx_m0 + point0_3d_cam.reshape(3,1)
-                # project to 2D (camera-frame point, use zero rvec/tvec)
-                proj_dx, _ = cv2.projectPoints(cam_pt_dx.reshape(1,3), r_vec_zero, t_vec_zero, self.cam_matrix, zero_dist_coefs)
-                proj_dx2 = tuple(proj_dx[0][0].astype(int))
-
-                # --- NEW: draw projected cyan line along marker0 Y axis (length = dy) ---
-                pt_dy_m0 = np.array([[0.0], [dy], [0.0]], dtype=np.float64)
-                cam_pt_dy = R_m0_to_cam @ pt_dy_m0 + point0_3d_cam.reshape(3,1)
-                proj_dy, _ = cv2.projectPoints(cam_pt_dy.reshape(1,3), r_vec_zero, t_vec_zero, self.cam_matrix, zero_dist_coefs)
-                proj_dy2 = tuple(proj_dy[0][0].astype(int))
-
-                # origin in image is point0_2d (point1_2d variable above)
-                origin2d = point1_2d
-
-                # draw X-axis projection (purple)
-                cv2.line(image, origin2d, proj_dx2, (255, 0, 255), 2)
-                cv2.circle(image, proj_dx2, 4, (255,0,255), -1)
-
-                # draw Y-axis projection (cyan)
-                cv2.line(image, origin2d, proj_dy2, (255, 255, 0), 2)
-                cv2.circle(image, proj_dy2, 4, (255,255,0), -1)
-
-                # label dx and dy near each projected endpoint (offset to avoid overlap)
-                mid_dx = ((origin2d[0] + proj_dx2[0]) // 2, (origin2d[1] + proj_dx2[1]) // 2 - 8)
-                mid_dy = ((origin2d[0] + proj_dy2[0]) // 2 + 8, (origin2d[1] + proj_dy2[1]) // 2)
-                cv2.putText(image, f"dx={dx:.2f}m", mid_dx, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,0,255), 2, cv2.LINE_AA)
-                cv2.putText(image, f"dy={dy:.2f}m", mid_dy, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,0), 2, cv2.LINE_AA)
-# ...existing code...
-                
-                
-            # --- Top-view frame visualization (marker0 reference, shows height too) ---
-            if 0 in marker_positions:
-                # 1️⃣  Get marker0 pose
-                t0 = marker_positions[0].reshape(3)
-                try:
-                    idx0 = np.where(ids.flatten() == 0)[0][0]
-                    rvec0 = rvecs[idx0].reshape(3)
-                except Exception:
-                    rvec0 = np.zeros(3)
-                R_m0_to_cam, _ = cv2.Rodrigues(rvec0)
-                R_cam_to_m0 = R_m0_to_cam.T  # camera → marker0 rotation
-
-                # 2️⃣  Make blank canvas
-                map_size = 600
-                scale = 300  # pixels per meter
-                center = (map_size // 2, map_size // 2)
-                map_img = np.ones((map_size, map_size, 3), np.uint8) * 255
-
-                # grid
-                for g in range(0, map_size, 50):
-                    cv2.line(map_img, (g, 0), (g, map_size), (230,230,230), 1)
-                    cv2.line(map_img, (0, g), (map_size, g), (230,230,230), 1)
-
-                # origin (ID0)
-                cv2.circle(map_img, center, 6, (0,0,255), -1)
-                cv2.putText(map_img, "ID0", (center[0]+8, center[1]-8),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50,50,50), 1)
-
-                # 3️⃣  For each marker, compute its coordinates in marker0 frame
-                for marker_id, pos_cam in marker_positions.items():
-                    t_i = pos_cam.reshape(3)
-                    p_rel = R_cam_to_m0.dot(t_i - t0)  # in marker0 frame
-
-                    x_m0, y_m0, z_m0 = p_rel  # local coordinates (m)
-
-                    # Convert to pixel coords for top view (XY plane)
-                    px = int(center[0] + x_m0 * scale)
-                    py = int(center[1] - y_m0 * scale)
-
-                    # Encode height (Z) by color: blue=below, red=above
-                    if abs(z_m0) < 0.01:
-                        color = (0, 255, 0)   # near plane → green
-                    elif z_m0 > 0:
-                        color = (0, 0, 255)   # above → red
-                    else:
-                        color = (255, 0, 0)   # below → blue
-
-                    cv2.circle(map_img, (px, py), 6, color, -1)
-                    cv2.putText(map_img,
-                                f"ID{marker_id} z={z_m0:.3f}m",
-                                (px + 8, py - 8),
-                                cv2.FONT_HERSHEY_SIMPLEX,
-                                0.5, (30, 30, 30), 1)
-
-                    # Optional: draw a small X-axis arrow in marker0 frame
+                    # Get rotation vector for marker 0
                     try:
-                        idx = np.where(ids.flatten() == marker_id)[0][0]
-                        rvec_i = rvecs[idx].reshape(3)
-                        R_mi_to_cam, _ = cv2.Rodrigues(rvec_i)
-                        x_axis_cam = R_mi_to_cam @ np.array([1.0, 0.0, 0.0])
-                        x_axis_m0 = R_cam_to_m0 @ x_axis_cam
-                        end = p_rel + 0.05 * x_axis_m0
-                        px2 = int(center[0] + end[0] * scale)
-                        py2 = int(center[1] - end[1] * scale)
-                        cv2.line(map_img, (px, py), (px2, py2), (100, 100, 255), 2)
+                        idx0 = np.where(ids.flatten() == 0)[0][0]
+                        rvec0 = rvecs[idx0].reshape(3, 1)
                     except Exception:
-                        pass
+                        # Fallback if rvec0 is somehow missed (though it should be here)
+                        rvec0 = np.zeros((3, 1))
 
-                # 4️⃣  Display the top view
-                cv2.imshow("Top View (marker0 XY, Z color)", map_img)
+                    # 1. Calculate the rotation matrix R_cam_to_m0 (Rotation from Camera to Marker 0 frame)
+                    # R_m0_to_cam is the rotation from Marker 0 to Camera frame
+                    R_m0_to_cam, _ = cv2.Rodrigues(rvec0)
+                    R_cam_to_m0 = R_m0_to_cam.T # The inverse rotation
 
-            #***********************************************************************************
-            
-            #***********************************************************************************
+                    # 2. Compute the position of Marker 1 RELATIVE to Marker 0, in Marker 0's frame
+                    # p_rel_cam = t1 - t0  (Vector from 0 to 1, in Camera Frame)
+                    p_rel_cam = point4_3d_cam - point0_3d_cam
+
+                    # p_rel_m0 = R_cam_to_m0 @ p_rel_cam (Vector from 0 to 1, in Marker 0 Frame)
+                    p_rel_m0 = R_cam_to_m0 @ p_rel_cam.reshape(3, 1)
 
                     
+                    # 3. Extract the distances and calculate the total Euclidean distance
+                    dx = p_rel_m0[0, 0]
+                    dy = p_rel_m0[1, 0]
+                    dz = p_rel_m0[2, 0]
+                    
+                    # Total distance (Euclidean, should match the old calculation)
+                    distance_total = np.linalg.norm(p_rel_cam) 
+
+                    # 4. Project the 3D points to 2D image coordinates to draw the line and text.
+                    # Use the midpoint of the camera vectors for the text label position.
+                    mid_point_3d_cam = (point0_3d_cam + point4_3d_cam) / 2
+                    
+                    r_vec_zero = np.zeros((3, 1))
+                    t_vec_zero = np.zeros((3, 1))
+                    
+                    # Project points to 2D
+                    points_2d, _ = cv2.projectPoints(
+                        np.array([point0_3d_cam, point4_3d_cam, mid_point_3d_cam]), 
+                        r_vec_zero, 
+                        t_vec_zero, 
+                        self.cam_matrix, 
+                        zero_dist_coefs
+                    )
+                    
+                    # Extract the 2D points.
+                    point1_2d = tuple(points_2d[0][0].astype(int))
+                    point2_2d = tuple(points_2d[1][0].astype(int))
+                    mid_point_2d = tuple(points_2d[2][0].astype(int))
+
+                    # Draw a line between the two marker centers. BGR
+                    cv2.line(image, point1_2d, point2_2d, (128, 0, 128), 2)
+
+                    # # --- NEW: draw projected purple line along marker0 X axis (length = dx) ---
+                    # # point at (dx, 0, 0) in marker0 frame
+                    # pt_dx_m0 = np.array([[dx], [0.0], [0.0]], dtype=np.float64)  # column vector
+                    # # convert to camera frame: cam_pt = R_m0_to_cam * pt_m0 + t0
+                    # cam_pt_dx = R_m0_to_cam @ pt_dx_m0 + point0_3d_cam.reshape(3,1)
+                    # # project to 2D (camera-frame point, use zero rvec/tvec)
+                    # proj_dx, _ = cv2.projectPoints(cam_pt_dx.reshape(1,3), r_vec_zero, t_vec_zero, self.cam_matrix, zero_dist_coefs)
+                    # proj_dx2 = tuple(proj_dx[0][0].astype(int))
+
+                    # # origin in image is point0_2d (point1_2d variable above)
+                    # origin2d = point1_2d
+                    # cv2.line(image, origin2d, proj_dx2, (255, 0, 255), 2)  # purple line along marker0 X axis
+
+                    # # label dx value near the middle of that line
+                    # mid_x = ((origin2d[0] + proj_dx2[0]) // 2, (origin2d[1] + proj_dx2[1]) // 2)
+                    # cv2.putText(image, f"dx={dx:.2f}m", mid_x, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,0,255), 2, cv2.LINE_AA)
+                    # # --- End of new code --
+                    # ...existing code...
+                    # --- NEW: draw projected purple line along marker0 X axis (length = dx) ---
+                    # point at (dx, 0, 0) in marker0 frame
+                    pt_dx_m0 = np.array([[dx], [0.0], [0.0]], dtype=np.float64)  # column vector
+                    # convert to camera frame: cam_pt = R_m0_to_cam * pt_m0 + t0
+                    cam_pt_dx = R_m0_to_cam @ pt_dx_m0 + point0_3d_cam.reshape(3,1)
+                    # project to 2D (camera-frame point, use zero rvec/tvec)
+                    proj_dx, _ = cv2.projectPoints(cam_pt_dx.reshape(1,3), r_vec_zero, t_vec_zero, self.cam_matrix, zero_dist_coefs)
+                    proj_dx2 = tuple(proj_dx[0][0].astype(int))
+
+                    # --- NEW: draw projected cyan line along marker0 Y axis (length = dy) ---
+                    pt_dy_m0 = np.array([[0.0], [dy], [0.0]], dtype=np.float64)
+                    cam_pt_dy = R_m0_to_cam @ pt_dy_m0 + point0_3d_cam.reshape(3,1)
+                    proj_dy, _ = cv2.projectPoints(cam_pt_dy.reshape(1,3), r_vec_zero, t_vec_zero, self.cam_matrix, zero_dist_coefs)
+                    proj_dy2 = tuple(proj_dy[0][0].astype(int))
+
+                    # origin in image is point0_2d (point1_2d variable above)
+                    origin2d = point1_2d
+
+                    # draw X-axis projection (purple)
+                    cv2.line(image, origin2d, proj_dx2, (255, 0, 255), 2)
+                    cv2.circle(image, proj_dx2, 4, (255,0,255), -1)
+
+                    # draw Y-axis projection (cyan)
+                    cv2.line(image, origin2d, proj_dy2, (255, 255, 0), 2)
+                    cv2.circle(image, proj_dy2, 4, (255,255,0), -1)
+
+                    # label dx and dy near each projected endpoint (offset to avoid overlap)
+                    mid_dx = ((origin2d[0] + proj_dx2[0]) // 2, (origin2d[1] + proj_dx2[1]) // 2 - 8)
+                    mid_dy = ((origin2d[0] + proj_dy2[0]) // 2 + 8, (origin2d[1] + proj_dy2[1]) // 2)
+                    cv2.putText(image, f"dx={dx:.2f}m", mid_dx, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,0,255), 2, cv2.LINE_AA)
+                    cv2.putText(image, f"dy={dy:.2f}m", mid_dy, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,0), 2, cv2.LINE_AA)
+    # ...existing code...
+                    
+                    
+                # --- Top-view frame visualization (marker0 reference, shows height too) ---
+                if 0 in marker_positions:
+                    # 1️⃣  Get marker0 pose
+                    t0 = marker_positions[0].reshape(3)
+                    try:
+                        idx0 = np.where(ids.flatten() == 0)[0][0]
+                        rvec0 = rvecs[idx0].reshape(3)
+                    except Exception:
+                        rvec0 = np.zeros(3)
+                    R_m0_to_cam, _ = cv2.Rodrigues(rvec0)
+                    R_cam_to_m0 = R_m0_to_cam.T  # camera → marker0 rotation
+
+                    # 2️⃣  Make blank canvas
+                    map_size = 600
+                    scale = 300  # pixels per meter
+                    center = (map_size // 2, map_size // 2)
+                    map_img = np.ones((map_size, map_size, 3), np.uint8) * 255
+
+                    # grid
+                    for g in range(0, map_size, 50):
+                        cv2.line(map_img, (g, 0), (g, map_size), (230,230,230), 1)
+                        cv2.line(map_img, (0, g), (map_size, g), (230,230,230), 1)
+
+                    # origin (ID0)
+                    cv2.circle(map_img, center, 6, (0,0,255), -1)
+                    cv2.putText(map_img, "ID0", (center[0]+8, center[1]-8),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (50,50,50), 1)
+
+                    # 3️⃣  For each marker, compute its coordinates in marker0 frame
+                    for marker_id, pos_cam in marker_positions.items():
+                        t_i = pos_cam.reshape(3)
+                        p_rel = R_cam_to_m0.dot(t_i - t0)  # in marker0 frame
+
+                        x_m0, y_m0, z_m0 = p_rel  # local coordinates (m)
+
+                        # Convert to pixel coords for top view (XY plane)
+                        px = int(center[0] + x_m0 * scale)
+                        py = int(center[1] - y_m0 * scale)
+
+                        # Encode height (Z) by color: blue=below, red=above
+                        if abs(z_m0) < 0.01:
+                            color = (0, 255, 0)   # near plane → green
+                        elif z_m0 > 0:
+                            color = (0, 0, 255)   # above → red
+                        else:
+                            color = (255, 0, 0)   # below → blue
+
+                        cv2.circle(map_img, (px, py), 6, color, -1)
+                        cv2.putText(map_img,
+                                    f"ID{marker_id} z={z_m0:.3f}m",
+                                    (px + 8, py - 8),
+                                    cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.5, (30, 30, 30), 1)
+
+                        # Optional: draw a small X-axis arrow in marker0 frame
+                        try:
+                            idx = np.where(ids.flatten() == marker_id)[0][0]
+                            rvec_i = rvecs[idx].reshape(3)
+                            R_mi_to_cam, _ = cv2.Rodrigues(rvec_i)
+                            x_axis_cam = R_mi_to_cam @ np.array([1.0, 0.0, 0.0])
+                            x_axis_m0 = R_cam_to_m0 @ x_axis_cam
+                            end = p_rel + 0.05 * x_axis_m0
+                            px2 = int(center[0] + end[0] * scale)
+                            py2 = int(center[1] - end[1] * scale)
+                            cv2.line(map_img, (px, py), (px2, py2), (100, 100, 255), 2)
+                        except Exception:
+                            pass
+
+                    # 4️⃣  Display the top view
+                    cv2.imshow("Top View (marker0 XY, Z color)", map_img)
+
+                #***********************************************************************************
+                
+                #***********************************************************************************
+                if 0 in marker_positions and 5 in marker_positions:
+                    point0_3d_cam = marker_positions[0] # tvec for marker 0 (in Camera Frame)
+                    point1_3d_cam = marker_positions[5] # tvec for marker 1 (in Camera Frame)
+
+                    # Get rotation vector for marker 0
+                    try:
+                        idx0 = np.where(ids.flatten() == 0)[0][0]
+                        rvec0 = rvecs[idx0].reshape(3, 1)
+                    except Exception:
+                        # Fallback if rvec0 is somehow missed (though it should be here)
+                        rvec0 = np.zeros((3, 1))
+
+                    # 1. Calculate the rotation matrix R_cam_to_m0 (Rotation from Camera to Marker 0 frame)
+                    # R_m0_to_cam is the rotation from Marker 0 to Camera frame
+                    R_m0_to_cam, _ = cv2.Rodrigues(rvec0)
+                    R_cam_to_m0 = R_m0_to_cam.T # The inverse rotation
+
+                    # 2. Compute the position of Marker 1 RELATIVE to Marker 0, in Marker 0's frame
+                    # p_rel_cam = t1 - t0  (Vector from 0 to 1, in Camera Frame)
+                    p_rel_cam = point1_3d_cam - point0_3d_cam
+
+                    # p_rel_m0 = R_cam_to_m0 @ p_rel_cam (Vector from 0 to 1, in Marker 0 Frame)
+                    p_rel_m0 = R_cam_to_m0 @ p_rel_cam.reshape(3, 1)
+
+                    
+                    # 3. Extract the distances and calculate the total Euclidean distance
+                    dx = p_rel_m0[0, 0]
+                    dy = p_rel_m0[1, 0]
+                    dz = p_rel_m0[2, 0]
+                    
+                    print(f"Marker 0 to 5 distances in marker0 frame: dx={dx:.3f}m")
+                        
                 
                 
         cv2.imshow("Frame", image)
@@ -632,18 +607,20 @@ if __name__ == "__main__":
         dist_coeff = np.array([-0.15259701966137876, 0.6092617145206677, 0.0007901395004658092, 0.0026990411152102638, -0.6577414700462231]) 
     # Map marker IDs to model paths
     id_to_model = {
-        0: './Models/Barn/ban.obj',
-        1: './Models/INV/INV.obj',
+        1: './Models/Barn/ban.obj',
+        0: './Models/INV/INV.obj',
         2: './Models/Monster/Sinbad_4_000001.obj',
         3: './Models/Button/model.obj',
-        4: './Models/EBox/EBox.obj'
+        4: './Models/EBox/EBox.obj',
+        5: './Models/Monster/Sinbad_4_000001.obj'
     }
     model_scale_dict = {
-        0: 0.01,  # scale for marker 0
-        1: 1,   # scale for marker 1
+        1: 0.01,  # scale for marker 0
+        0: 1,   # scale for marker 1
         2: 1,   # scale for marker 2
         3: 0.1,
-        4: 1
+        4: 1,
+        5: 0.1
     }
     ar_instance = AR_render(cam_matrix, dist_coeff, id_to_model, model_scale_dict)
     
