@@ -15,8 +15,8 @@ except FileNotFoundError:
 # --- 2. Initialize Video Capture ---
 # Use the default webcam. Change the index if you have multiple cameras.
 src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
-# cap = cv.VideoCapture(0)
-cap = cv.VideoCapture(src)
+cap = cv.VideoCapture(0)
+# cap = cv.VideoCapture(src)
 
 if not cap.isOpened():
     print("Error: Could not open webcam.")
@@ -24,8 +24,8 @@ if not cap.isOpened():
 
 # Set a fixed resolution for the video stream for consistent processing.
 # You can change these values as needed.
-frame_width = 1280
-frame_height = 720
+frame_width = 640
+frame_height = 360
 cap.set(cv.CAP_PROP_FRAME_WIDTH, frame_width)
 cap.set(cv.CAP_PROP_FRAME_HEIGHT, frame_height)
 

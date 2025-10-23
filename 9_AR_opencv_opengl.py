@@ -29,8 +29,9 @@ class AR_render:
         # Initialise webcam and start thread
         # src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
         src="http://192.168.1.59:45629/videostream.cgi?user=admin&pwd=88888888"
-        # self.webcam = cv2.VideoCapture(0)
-        self.webcam = cv2.VideoCapture(src)
+        self.webcam = cv2.VideoCapture(0)
+        # self.webcam = cv2.VideoCapture(src)
+        print("webcam name: ", self.webcam.getBackendName())
         self.image_w, self.image_h = map(int, (self.webcam.get(3), self.webcam.get(4)))
         print("wh: ",self.image_w, self.image_h)
         self.initOpengl(self.image_w, self.image_h)
@@ -58,23 +59,13 @@ class AR_render:
   
     def initOpengl(self, width, height, pos_x = 500, pos_y = 500, window_name = b'Aruco Demo'):
         
-        """[Init opengl configuration]
-        
-        Arguments:
-            width {[int]} -- [width of opengl viewport]
-            height {[int]} -- [height of opengl viewport]
-        
-        Keyword Arguments:
-            pos_x {int} -- [X cordinate of viewport] (default: {500})
-            pos_y {int} -- [Y cordinate of viewport] (default: {500})
-            window_name {bytes} -- [Window name] (default: {b'Aruco Demo'})
-        """
+        """[Init opengl configuration]"""
         
         glutInit()
         glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH)
         glutInitWindowSize(width, height)
         glutInitWindowPosition(pos_x, pos_y)
-     
+      
         
         
         
@@ -86,18 +77,38 @@ class AR_render:
         glClearDepth(1.0)
         glShadeModel(GL_SMOOTH)
         glDepthFunc(GL_LESS)
-        glEnable(GL_DEPTH_TEST)
+        glEnable(GL_DEPTH_TEST) # Enables depth for proper 3D rendering
         
-        # # Assign texture
+        # --- NEW/UPDATED LIGHTING SETUP FOR SHADING ---
+        glEnable(GL_LIGHTING)    # 1. Enable the global lighting system
+        glEnable(GL_LIGHT0)      # 2. Enable Light Source 0
+
+        # allow glColor to affect material when lighting is enabled
+        glEnable(GL_COLOR_MATERIAL)
+        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
+
+        # normalize normals after scaling (important for correct lighting)
+        glEnable(GL_NORMALIZE)
+
+        # 3. Define the light source properties
+        # Simple white directional light coming from (+X, +Y, +Z)
+        light_ambient = (0.4, 0.4, 0.4, 1.0) # Low ambient light to give some color to unlit areas
+        light_diffuse = (1.0, 1.0, 1.0, 1.0) # Bright white diffuse light
+        light_specular = (1.0, 1.0, 1.0, 1.0) # Bright specular highlights
+        light_position = (0.0, 1.0, 1.0, 0.0) # Directional light (W=0.0)
+        
+        glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient)
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse)
+        glLightfv(GL_LIGHT0, GL_SPECULAR, light_specular)
+        glLightfv(GL_LIGHT0, GL_POSITION, light_position)
+
+        # ---------------------------------------------
+        
+        # # Assign texture (keep as is)
         glEnable(GL_TEXTURE_2D)
         
-        # Add listener
+        # Add listener (keep as is)
         glutKeyboardFunc(self.keyBoardListener)
-        
-        # Set ambient lighting
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, (0.5,0.5,0.5,1))
-        
-        
         
         
  
@@ -356,10 +367,36 @@ class AR_render:
 
                         # --- Draw the 3D model ---
                         glColor3f(1.0, 1.0, 1.0)  # Reset color
-                        scale = self.model_scale_dict.get(marker_id, 0.01)  # Default scale if not found
+                        
+                        # --- Draw the 3D model ---
+                        # 1. DEFINE MATERIAL PROPERTIES FOR THE MODEL
+                        # Example: Use a white diffuse color for the model
+                        model_ambient_diffuse = [0.8, 0.8, 0.8, 1.0] # Light gray/near-white
+                        model_specular = [0.2, 0.2, 0.2, 1.0]       # Small specular highlight
+                        model_shininess = [10.0]                    # Low shininess
+
+                        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, model_ambient_diffuse)
+                        glMaterialfv(GL_FRONT, GL_SPECULAR, model_specular)
+                        glMaterialfv(GL_FRONT, GL_SHININESS, model_shininess)
+
+                        # 2. APPLY TRANSFORMATIONS
+                        scale = self.model_scale_dict.get(marker_id, 0.01) # Default scale if not found
+                        glPushMatrix()
                         glScaled(scale, scale, scale)
                         glTranslatef(self.translate_x, self.translate_y, self.translate_z)
+
+                        # Ensure textures enabled if OBJ has textures
+                        glEnable(GL_TEXTURE_2D)
+
+                        # 3. DRAW MODEL
+                        # If objloader uses glColor for materials, this will let them show.
+                        glColor3f(1.0, 1.0, 1.0)
                         glCallList(self.models[marker_id].gl_list)
+
+                        glDisable(GL_TEXTURE_2D)
+                        glPopMatrix()
+                        # Reset material to default (optional, but clean)
+                        # glColor3f(1.0, 1.0, 1.0) # NOTE: glColor3f is ignored when GL_LIGHTING is on
 
                     # Store the 3D position of the detected marker.
                     marker_positions[marker_id] = tvecs[i][0]
@@ -879,19 +916,21 @@ if __name__ == "__main__":
     # Map marker IDs to model paths
     id_to_model = {
         1: './Models/Barn/ban.obj',
-        0: './Models/INV/INV.obj',
+        0: './Models/INV/luna2000_213ktl.obj',
         2: './Models/Monster/Sinbad_4_000001.obj',
         3: './Models/Wireway/wireway1.obj',
         4: './Models/EBox/EBox.obj',
-        5: './Models/Button/model.obj'
+        5: './Models/Button/button.obj',
+        5: './Models/Sphere/sphere.obj'
     }
     model_scale_dict = {
-        1: 0.01,  # scale for marker 0
+        1: 0.02,  # scale for marker 0
         0: 1,
-        2: 1,
+        2: 0.1,
         3: 1,
         4: 1,
-        5: 0.1
+        5: 0.1,
+        6: 0.1
     }
     ar_instance = AR_render(cam_matrix, dist_coeff, id_to_model, model_scale_dict)
     

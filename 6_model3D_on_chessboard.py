@@ -50,14 +50,14 @@ objp[:, :2] = np.mgrid[0:chessboard_size[0], 0:chessboard_size[1]].T.reshape(-1,
 
 # --- 4. Initialize Video Capture ---
 src="http://192.168.1.59:43100/videostream.cgi?user=admin&pwd=88888888"
-# cap = cv.VideoCapture(0)
-cap = cv.VideoCapture(src)
+cap = cv.VideoCapture(0)
+# cap = cv.VideoCapture(src)
 if not cap.isOpened():
     print("Error: Could not open webcam.")
     exit()
 # Set a fixed resolution for consistent processing
-frame_width = 1280
-frame_height = 720
+frame_width = 640
+frame_height = 360
 cap.set(cv.CAP_PROP_FRAME_WIDTH, frame_width)
 cap.set(cv.CAP_PROP_FRAME_HEIGHT, frame_height)
 

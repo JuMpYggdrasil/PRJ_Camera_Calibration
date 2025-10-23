@@ -8,7 +8,7 @@ from stl import mesh
 # --- 1. Load 3D Model from STL file ---
 try:
     # Load the STL file. Make sure your STL file is in the same directory as this script.
-    model_mesh = mesh.Mesh.from_file('model2.stl')
+    model_mesh = mesh.Mesh.from_file('model.stl')
     
     # Extract vertices from the STL mesh
     model_vertices = model_mesh.vectors.reshape(-1, 3)

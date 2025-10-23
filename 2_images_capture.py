@@ -27,8 +27,8 @@ if not os.path.exists(output_dir):
 # you might need to change this to 1, 2, etc.
 
 src="http://192.168.1.59:7180/videostream.cgi?user=admin&pwd=88888888"
-# cap = cv.VideoCapture(0)
-cap = cv.VideoCapture(src)
+cap = cv.VideoCapture(0)
+# cap = cv.VideoCapture(src)
 
 # Set the resolution of the video stream.
 cap.set(cv.CAP_PROP_FRAME_WIDTH, frame_width)
