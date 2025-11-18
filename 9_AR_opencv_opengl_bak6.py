@@ -14,8 +14,6 @@ from tools.objloader import * #Load obj and corresponding material and textures.
 from tools.matrixTrans import extrinsic2ModelView, intrinsic2Project
 from tools.Filter import Filter
 
-MODE_MODEL = 0
-MODE_DETAIL = 1
 
 class AR_render:
     def __init__(self, camera_matrix, dist_coefs, id_to_model, model_scale_dict):
@@ -45,12 +43,6 @@ class AR_render:
         # Model translate that you can adjust by key board 'w', 's', 'a', 'd'
         self.translate_x, self.translate_y, self.translate_z = 0, 0, 0
         self.pre_extrinsicMatrix = {}
-        
-        # variables for click detection and text display
-        self.mouse_x, self.mouse_y = -1, -1  # Stores the last click position
-        self.clicked_marker_id = None        # Stores the ID of the clicked object
-        self.marker_modes = {}       # Key to individual tracking
-        self.object_centers_2d = {}          # Stores 2D center of objects for proximity check
         
         self.filter = Filter()
         
@@ -117,10 +109,6 @@ class AR_render:
         
         # Add listener (keep as is)
         glutKeyboardFunc(self.keyBoardListener)
-        
-        # --- NEW: Register mouse listener ---
-        glutMouseFunc(self.mouseListener) 
-        # ------------------------------------
         
         
  
@@ -244,56 +232,7 @@ class AR_render:
 
             # Reset color (optional, but good practice)
             glColor3f(1.0, 1.0, 1.0)
-            
-    def draw_text_opengl(self, text, x, y, z):
-        """
-        Draws 3D text (as a screen-aligned label) at a specific 3D coordinate (x, y, z).
-        
-        Note: This is a simplified approach, drawing in screen space.
-        For true 3D text, you'd calculate the projection or use stroke fonts.
-        """
-        
-        # 1. Store and switch to projection matrix for screen drawing (2D overlay)
-        glMatrixMode(GL_PROJECTION)
-        glPushMatrix()
-        glLoadIdentity()
-        # Set up a 2D orthogonal projection
-        gluOrtho2D(0, self.image_w, 0, self.image_h)
 
-        glMatrixMode(GL_MODELVIEW)
-        glPushMatrix()
-        glLoadIdentity()
-        
-        # 2. Project the 3D coordinate (x, y, z) to 2D screen coordinates
-        # You need the current modelview matrix (M) and projection matrix (P) 
-        # that were used when drawing the 3D scene, which is tricky to retrieve/store.
-        # Instead, we will directly calculate the 2D position *before* calling this function
-        # in draw_objects, using cv2.projectPoints as before, and pass the 2D coords.
-        
-        # We will assume x and y passed in are ALREADY the 2D screen coordinates (Top-Down Y).
-        
-        # Use glRasterPos to position the text drawing start
-        # Remember: OpenGL's native Y is bottom-up (0,0 is bottom-left).
-        # We need to flip the y coordinate from OpenCV's top-down to OpenGL's bottom-up.
-        
-        glRasterPos2f(x, self.image_h - y)
-        
-        # 3. Set the color and render the text
-        glColor3f(0.0, 1.0, 0.0) # Green color for the text
-        font = GLUT_BITMAP_9_BY_15
-        
-        for character in text:
-            # GLUT_BITMAP_9_BY_15 is a common font size
-            glutBitmapCharacter(font, ord(character))
-            
-        # 4. Restore matrices
-        glPopMatrix()
-        glMatrixMode(GL_PROJECTION)
-        glPopMatrix()
-        glMatrixMode(GL_MODELVIEW)
-        
-        # Reset color to white for the models
-        glColor3f(1.0, 1.0, 1.0)
 
 
  
@@ -381,8 +320,6 @@ class AR_render:
         glMultMatrixf(projectMatrix)
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
-        
-        self.object_centers_2d = {} # Clear centers at the start of the frame
 
         if ids is not None and corners is not None:
             # rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, mark_size, self.cam_matrix, self.dist_coefs)
@@ -399,110 +336,72 @@ class AR_render:
                 if marker_id in self.models:
                     rvec = rvecs[i]
                     tvec = tvecs[i]
+                    draw_axis(image, rvec, tvec, self.cam_matrix, zero_dist_coefs)# draw on undistorted image
+                    # draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)# draw on distorted image
                     
-                    # --- NEW: Calculate 2D center for click detection ---
-                    # The origin (0,0,0) of the marker frame is a good center point.
-                    point_3d_origin = np.array([[0.0, 0.0, 0.0]], dtype=np.float32)
-                    center_2d_proj, _ = cv2.projectPoints(point_3d_origin, rvec, tvec, self.cam_matrix, zero_dist_coefs)
-                    center_2d = tuple(center_2d_proj[0][0].astype(int))
-                    self.object_centers_2d[marker_id] = center_2d
-                    # ---------------------------------------------------
+                    # --- Draw small red circle at (x=0.1, y=0, z=0) relative to the marker origin ---
+                    point_3d = np.array([[0.15, 0.0, 0.0]], dtype=np.float32)  # 1 cm along X-axis
+                    points_2d, _ = cv2.projectPoints(point_3d, rvec, tvec, self.cam_matrix, zero_dist_coefs)
+                    center_2d = tuple(points_2d[0][0].astype(int))
+                    cv2.circle(image, center_2d, 5, (0, 0, 255), -1)  # Red circle in image
                     
-                    current_mode = self.marker_modes.get(marker_id, MODE_MODEL)
-                    if current_mode == MODE_MODEL:
-                        # RENDER 3D MODEL
-                        # ... draw_axis, glMatrixMode, draw_model ...
-                            
-                    
+                    if self.filter.update(tvec):
+                        model_matrix = extrinsic2ModelView(rvec, tvec)
+                        self.pre_extrinsicMatrix[marker_id] = model_matrix
+                    else:
+                        model_matrix = self.pre_extrinsicMatrix.get(marker_id)
                         
-                            
-                        draw_axis(image, rvec, tvec, self.cam_matrix, zero_dist_coefs)# draw on undistorted image
-                        # draw_axis(image, rvec, tvec, self.cam_matrix, self.dist_coefs)# draw on distorted image
+                    if model_matrix is not None:
+                        glLoadMatrixf(model_matrix)  # sets the coordinate system for the next drawing call
+
+                        # --- Draw the OpenGL axis ---
+                        self.draw_axis_opengl(axis_length=0.1)
+
+                        # --- Draw a small red sphere at (x=0.15, y=0, z=0) ---
+                        glColor3f(1.0, 0.0, 0.0)  # Red color
+                        glPushMatrix()
+                        glTranslatef(0.15, 0.0, 0.0)  # Move 15 cm along X-axis of the marker
+                        quad = gluNewQuadric()
+                        gluSphere(quad, 0.005, 12, 12)  # Radius = 0.005 m (5 mm)
+                        glPopMatrix()
+
+                        # --- Draw the 3D model ---
+                        glColor3f(1.0, 1.0, 1.0)  # Reset color
                         
-                        # --- Draw small red circle at (x=0.1, y=0, z=0) relative to the marker origin ---
-                        point_3d = np.array([[0.15, 0.0, 0.0]], dtype=np.float32)  # 1 cm along X-axis
-                        points_2d, _ = cv2.projectPoints(point_3d, rvec, tvec, self.cam_matrix, zero_dist_coefs)
-                        center_2d = tuple(points_2d[0][0].astype(int))
-                        cv2.circle(image, center_2d, 5, (0, 0, 255), -1)  # Red circle in image
-                        
-                        if self.filter.update(tvec):
-                            model_matrix = extrinsic2ModelView(rvec, tvec)
-                            self.pre_extrinsicMatrix[marker_id] = model_matrix
-                        else:
-                            model_matrix = self.pre_extrinsicMatrix.get(marker_id)
-                            
-                        if model_matrix is not None:
-                            glLoadMatrixf(model_matrix)  # sets the coordinate system for the next drawing call
+                        # --- Draw the 3D model ---
+                        # 1. DEFINE MATERIAL PROPERTIES FOR THE MODEL
+                        # Example: Use a white diffuse color for the model
+                        model_ambient_diffuse = [0.8, 0.8, 0.8, 1.0] # Light gray/near-white
+                        model_specular = [0.2, 0.2, 0.2, 1.0]       # Small specular highlight
+                        model_shininess = [10.0]                    # Low shininess
 
-                            # --- Draw the OpenGL axis ---
-                            self.draw_axis_opengl(axis_length=0.1)
+                        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, model_ambient_diffuse)
+                        glMaterialfv(GL_FRONT, GL_SPECULAR, model_specular)
+                        glMaterialfv(GL_FRONT, GL_SHININESS, model_shininess)
 
-                            # --- Draw a small red sphere at (x=0.15, y=0, z=0) ---
-                            glColor3f(1.0, 0.0, 0.0)  # Red color
-                            glPushMatrix()
-                            glTranslatef(0.15, 0.0, 0.0)  # Move 15 cm along X-axis of the marker
-                            quad = gluNewQuadric()
-                            gluSphere(quad, 0.005, 12, 12)  # Radius = 0.005 m (5 mm)
-                            glPopMatrix()
+                        # 2. APPLY TRANSFORMATIONS
+                        scale = self.model_scale_dict.get(marker_id, 0.01) # Default scale if not found
+                        glPushMatrix()
+                        glScaled(scale, scale, scale)
+                        glTranslatef(self.translate_x, self.translate_y, self.translate_z)
 
-                            # --- Draw the 3D model ---
-                            glColor3f(1.0, 1.0, 1.0)  # Reset color
-                            
-                            # --- Draw the 3D model ---
-                            # 1. DEFINE MATERIAL PROPERTIES FOR THE MODEL
-                            # Example: Use a white diffuse color for the model
-                            model_ambient_diffuse = [0.8, 0.8, 0.8, 1.0] # Light gray/near-white
-                            model_specular = [0.2, 0.2, 0.2, 1.0]       # Small specular highlight
-                            model_shininess = [10.0]                    # Low shininess
+                        # Ensure textures enabled if OBJ has textures
+                        glEnable(GL_TEXTURE_2D)
 
-                            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, model_ambient_diffuse)
-                            glMaterialfv(GL_FRONT, GL_SPECULAR, model_specular)
-                            glMaterialfv(GL_FRONT, GL_SHININESS, model_shininess)
+                        # 3. DRAW MODEL
+                        # If objloader uses glColor for materials, this will let them show.
+                        glColor3f(1.0, 1.0, 1.0)
+                        glCallList(self.models[marker_id].gl_list)
 
-                            # 2. APPLY TRANSFORMATIONS
-                            scale = self.model_scale_dict.get(marker_id, 0.01) # Default scale if not found
-                            glPushMatrix()
-                            glScaled(scale, scale, scale)
-                            glTranslatef(self.translate_x, self.translate_y, self.translate_z)
+                        glDisable(GL_TEXTURE_2D)
+                        glPopMatrix()
+                        # Reset material to default (optional, but clean)
+                        # glColor3f(1.0, 1.0, 1.0) # NOTE: glColor3f is ignored when GL_LIGHTING is on
 
-                            # Ensure textures enabled if OBJ has textures
-                            glEnable(GL_TEXTURE_2D)
-
-                            # 3. DRAW MODEL
-                            # If objloader uses glColor for materials, this will let them show.
-                            glColor3f(1.0, 1.0, 1.0)
-                            glCallList(self.models[marker_id].gl_list)
-
-                            glDisable(GL_TEXTURE_2D)
-                            glPopMatrix()
-                            # Reset material to default (optional, but clean)
-                            # glColor3f(1.0, 1.0, 1.0) # NOTE: glColor3f is ignored when GL_LIGHTING is on
-
-                        
                     # Store the 3D position of the detected marker.
                     marker_positions[marker_id] = tvecs[i][0]
                 else:
                     marker_positions[marker_id] = np.zeros(3, dtype=np.float64)
-                    
-            if current_mode == MODE_DETAIL:
-                # RENDER DETAIL TEXT
-                # --- NEW: Draw click text and highlight the clicked object ---
-                if self.clicked_marker_id is not None and self.clicked_marker_id in self.object_centers_2d:
-                    center_2d = self.object_centers_2d[self.clicked_marker_id]
-                    text = f"Clicked ID: {self.clicked_marker_id}"
-                    
-                    # Highlight the clicked marker (e.g., a green circle)
-                    cv2.circle(image, center_2d, 10, (0, 255, 0), 2) 
-
-                    # # Display the text above the clicked object's 2D center
-                    # text_pos = (center_2d[0], center_2d[1] - 20)
-                    # cv2.putText(image, text, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
-                    text_x = center_2d[0]
-                    text_y = center_2d[1] - 20 # Y-down coordinate system
-
-                    # Call the OpenGL text function. We pass a dummy Z (0) as the function ignores it.
-                    self.draw_text_opengl(text, text_x, text_y, 0.0)
-                # -----------------------------------------------------------------
                 
             # --- distance calculation and drawing in ID0 frame ---
             # Check if both markers 0 and 3 are detected.
@@ -990,42 +889,7 @@ class AR_render:
             self.translate_y -= 0.1
         elif key == 'd':
             self.translate_y += 0.1
-    def mouseListener(self, button, state, x, y):
-        """[Process mouse clicks for object selection and toggling display]"""
-        if button == GLUT_LEFT_BUTTON and state == GLUT_DOWN:
-            self.mouse_x = x
-            self.mouse_y = y
-            
-            # Find the marker ID hit by the current click
-            hit_id = self.check_click(self.mouse_x, self.mouse_y)
-
-            if hit_id is not None:
-                current_mode = self.marker_modes.get(hit_id, MODE_MODEL)
-                
-                if current_mode == MODE_MODEL:
-                    self.marker_modes[hit_id] = MODE_DETAIL
-                else:
-                    self.marker_modes[hit_id] = MODE_MODEL
-                
-    def check_click(self, click_x, click_y, tolerance=100):
-        """[Checks if a click is close to any object's 2D center]
-        
-        Arguments:
-            click_x {int} -- [Click X coordinate (flipped Y)]
-            click_y {int} -- [Click Y coordinate (flipped Y)]
-            tolerance {int} -- [Radius in pixels for click detection]
-        
-        Returns:
-            [int or None] -- [ID of the clicked marker or None]
-        """
-        for marker_id, center_2d in self.object_centers_2d.items():
-            cx, cy = center_2d
-            # Calculate distance between click and object center
-            distance = np.sqrt((click_x - cx)**2 + (click_y - cy)**2)
-            
-            if distance <= tolerance:
-                return marker_id
-        return None
+             
         
     def run(self):
         # Begin to render
